@@ -1,0 +1,39 @@
+{
+  "name": "m365-claude-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Experimental local bridge for Claude Code and Claude models in Microsoft 365 Copilot through Excel and Chrome",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "m365-claude-bridge": "dist/packages/cli/index.js"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "build:desktop": "node scripts/build-desktop.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run build && node --test dist/tests/*.test.js",
+    "start": "node dist/packages/cli/index.js start",
+    "doctor": "node dist/packages/cli/index.js doctor",
+    "export:source": "node scripts/export-source.mjs",
+    "test:export": "node --test scripts/export-source.test.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "ajv": "^8.17.1",
+    "ws": "^8.18.3",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.1.24",
+    "@types/jsdom": "^21.1.7",
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.18.1",
+    "esbuild": "^0.25.0",
+    "jsdom": "^26.1.0",
+    "typescript": "^5.9.0"
+  },
+  "license": "MIT"
+}

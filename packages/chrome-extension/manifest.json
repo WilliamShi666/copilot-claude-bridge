@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "M365 Claude Bridge (Experimental)",
+  "version": "0.1.0",
+  "description": "Pair a Copilot chat frame with an authenticated local Claude Code gateway.",
+  "minimum_chrome_version": "120",
+  "permissions": ["activeTab", "scripting", "storage", "alarms"],
+  "host_permissions": ["http://127.0.0.1/*"],
+  "optional_host_permissions": ["https://*.officeapps.live.com/*"],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_popup": "popup.html", "default_title": "Pair Copilot with Claude Code" },
+  "content_security_policy": { "extension_pages": "script-src 'self'; object-src 'self'; connect-src http://127.0.0.1:* ws://127.0.0.1:*" }
+}

@@ -1,0 +1,31 @@
+name: Bug report
+description: Report a reproducible installation, transport or session problem.
+body:
+  - type: markdown
+    attributes:
+      value: "Remove pairing codes, authentication tokens, workbook URLs, account/session IDs and private source content. Do not paste your whole transcript or bridge state."
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS/WSL distro, Node, Chrome, Claude Code and bridge versions; visible Copilot model label.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Use a disposable workspace and minimal request when possible.
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: Expected and actual result
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Redacted diagnostics
+      description: Exact error and relevant doctor status fields. Do not include credentials or full native transcripts.

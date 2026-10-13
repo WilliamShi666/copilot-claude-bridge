@@ -1,0 +1,10 @@
+import {execFileSync} from 'node:child_process';
+import {mkdir} from 'node:fs/promises';
+import {join,resolve} from 'node:path';
+if(process.platform!=='win32')throw new Error('Excel desktop adapter builds on Windows only');
+const framework=join(process.env.WINDIR??'C:\\Windows','Microsoft.NET','Framework64','v4.0.30319');
+await mkdir('dist/desktop',{recursive:true});
+execFileSync(join(framework,'csc.exe'),['/nologo','/out:'+resolve('dist/desktop/ImportUia.exe'),resolve('scripts/ImportUia.cs')],{stdio:'inherit',windowsHide:true});
+execFileSync(resolve('dist/desktop/ImportUia.exe'),['NativeUia.dll'],{cwd:resolve('dist/desktop'),stdio:'inherit',windowsHide:true});
+execFileSync(join(framework,'csc.exe'),['/nologo','/target:exe','/platform:x64','/out:'+resolve('dist/desktop/ExcelAdapter.exe'),'/r:'+resolve('dist/desktop/NativeUia.dll'),'/r:'+join(framework,'System.Web.Extensions.dll'),resolve('packages/excel-desktop/ExcelAdapter.cs')],{stdio:'inherit',windowsHide:true});
+console.log('Standalone Excel desktop adapter built.');

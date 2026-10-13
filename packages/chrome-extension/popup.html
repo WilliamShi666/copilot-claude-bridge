@@ -1,0 +1,8 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>M365 Claude Bridge</title><link rel="stylesheet" href="popup.css"><main>
+<h1>M365 Claude Bridge</h1><p>Keep the selected Excel Copilot tab open. Use Claude Code in your terminal after pairing.</p>
+<label>Local gateway<input id="url" value="http://127.0.0.1:59173" spellcheck="false"></label>
+<label>One-time pairing code<input id="code" type="password" autocomplete="off" placeholder="From bridge setup"></label>
+<p class="permissions">Pairing requests access to the Copilot add-in and Excel frame. The selected workbook is the main conversation; bridge-owned auxiliary workbook tabs isolate title and summary requests. Other user tabs are not operated. No Microsoft passwords, cookies, or login tokens are read.</p>
+<button id="pair">Pair selected Excel tab</button><button id="unpair">Disconnect and clear pairing</button>
+<pre id="status" role="status">Not paired</pre><p>Experimental UI transport. Token counts may be local estimates; measured provider usage and billing are unavailable.</p>
+</main><script src="popup.js"></script></html>
