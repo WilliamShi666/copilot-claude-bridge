@@ -2,6 +2,8 @@
 
 The Node gateway and native Claude Code run inside Ubuntu WSL. The logged-in Excel web workbook and extension remain in Windows Chrome. Chrome must be able to reach the WSL gateway through localhost forwarding; no public tunnel is needed.
 
+Personal accounts require Microsoft 365 Premium. Sign in to [Excel for the web](https://excel.cloud.microsoft/) in Windows Chrome with that subscription account before pairing. See the [account prerequisites](../../README.en.md#prerequisites) for commercial account eligibility.
+
 Install Node.js 22+ and native Linux Claude Code in WSL using their upstream installation instructions. In Ubuntu, verify `node --version` and `claude --version`. `command -v claude` must resolve to a Linux launcher rather than Windows' npm directory. Clone into a Linux directory:
 
 ```sh

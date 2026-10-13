@@ -5,7 +5,7 @@ import {resolve,dirname,join,relative} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
-export const publicFiles=['package.json','package-lock.json','tsconfig.json','.gitignore','.gitattributes','README.md','README.zh-CN.md','LICENSE','CONTRIBUTING.md','SECURITY.md','CHANGELOG.md','scripts/build.mjs','scripts/build-desktop.mjs','scripts/ImportUia.cs','scripts/export-source.mjs','scripts/export-source.test.mjs'];
+export const publicFiles=['package.json','package-lock.json','tsconfig.json','.gitignore','.gitattributes','README.md','README.en.md','README.zh-CN.md','LICENSE','CONTRIBUTING.md','SECURITY.md','CHANGELOG.md','scripts/build.mjs','scripts/build-desktop.mjs','scripts/ImportUia.cs','scripts/export-source.mjs','scripts/export-source.test.mjs'];
 export const publicDirectories=['packages','tests','docs/public','.github'];
 const patterns=[
  ['private key',/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/],

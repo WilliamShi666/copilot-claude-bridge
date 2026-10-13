@@ -44,14 +44,19 @@
       "sha256": "6eda1bfb21f8801c42999196d841c8b2e5d58065ce3ccc171a8e649857b19a6a"
     },
     {
+      "path": "README.en.md",
+      "bytes": 9183,
+      "sha256": "10e7acb5cc07be4e3ee4570b9ee2287692fc7ed9ca4bb69f5db0c5b38fb7a19c"
+    },
+    {
       "path": "README.md",
-      "bytes": 8490,
-      "sha256": "688fc7414c2220575722adc6db2219f024a23bf9fc7c0a17157e61da80789ea5"
+      "bytes": 6323,
+      "sha256": "d4c5f0d5e1bb86e5e7c206fe056d2b10ec1889a65d6044e2c77ad793e5e05976"
     },
     {
       "path": "README.zh-CN.md",
-      "bytes": 5472,
-      "sha256": "2dc0c372d8e1364d445943c502b9c848c40c0a722d1be54979a38511a481b927"
+      "bytes": 123,
+      "sha256": "a35b1cfb782dc80ce54b71b15f6900ae7e9fd7bfc121916c33955af16e3b9047"
     },
     {
       "path": "SECURITY.md",
@@ -85,8 +90,8 @@
     },
     {
       "path": "docs/public/wsl.md",
-      "bytes": 3090,
-      "sha256": "255a422c77fea4f159c3fd0222d93f5094bd35c152cf0286497deef0e5ba1c8e"
+      "bytes": 3370,
+      "sha256": "d23a381b497ccd1906f17fded1f21b1fc9fdaedaa30b07a288a1810875e4b0a1"
     },
     {
       "path": "package-lock.json",
@@ -275,8 +280,8 @@
     },
     {
       "path": "scripts/export-source.mjs",
-      "bytes": 5189,
-      "sha256": "d84c2c0730906e695a119b65949b7fb2118e9cabaa372bcd24069b10398233c3"
+      "bytes": 5204,
+      "sha256": "d46fc33c36f8e9ed6d39cba4d58145e9cb2a235a9ecccc539a66a027d4c5e9e3"
     },
     {
       "path": "scripts/export-source.test.mjs",
