@@ -300,8 +300,8 @@
     },
     {
       "path": "tests/background-reply.test.ts",
-      "bytes": 3612,
-      "sha256": "4da53a24d0c66b45e9e3f2e94f46a64faa42a9cfcbcc8ad07ef193957a1f04a3"
+      "bytes": 4075,
+      "sha256": "e2eb62b167d82eba707b38c9a3ca39da6d32cb637d4bf9805e864195b4f99ec1"
     },
     {
       "path": "tests/background.test.ts",
