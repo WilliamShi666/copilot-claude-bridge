@@ -84,6 +84,10 @@ This configures the client's threshold. It does not establish Copilot's provider
 
 ## Recovery and stopping
 
+Native subagents and in-process teammates have separate context records keyed by session, agent and model. Each agent continues in its own bridge-owned workbook tab. Browser inference is serialized through one queue; local tools remain under Claude Code. Queue waiting and generation have separate deadlines, and canceling an unsent request does not cancel a sibling. Up to 16 agent tabs are retained; close completed tabs manually. Split-pane team processes require separate validation. After rebuilding/reloading the extension, `doctor` must show `capabilities.agentContexts: 1` for agent routing.
+
+Native Auto mode passed a limited live check: three named teammates started together and each continued with Write, Read and Bash without manual Yes approvals. See the [validation scope](docs/public/validation.md) for details and limitations.
+
 Keep Chrome, the paired workbook and Copilot open. Do not manually switch that chat during a request. If the extension was rebuilt, reload it, refresh the workbook and select **Use selected Excel tab** when already paired. After restarting a gateway, run `doctor` again.
 
 If the client reports **409 Native context delivery is uncertain**, first let the request finish or cancel it; then use the native session ID shown in the error:
@@ -93,6 +97,8 @@ node dist/packages/cli/index.js context-reset --session <native-session-id>
 ```
 
 Retry from Claude Code after checking the actual workspace for any completed tool effects. This resets local context tracking; it cannot undo an already executed tool. Uncertain requests are not automatically replayed.
+
+For an agent-specific error, use its suggested `context-reset --session <native-session-id> --agent <agent-id>` command. This resets that agent's records and compaction tracking without resetting the lead or siblings.
 
 ```powershell
 node dist/packages/cli/index.js stop

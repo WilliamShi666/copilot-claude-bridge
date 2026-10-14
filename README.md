@@ -57,6 +57,10 @@ node dist/packages/cli/index.js run --experimental-copilot-backend --model sonne
 
 普通轮次在同一个已校验的 Copilot 主聊天中增量传递。标题与摘要使用独立辅助聊天。首次请求包含系统指令、工具定义和历史，所以可能很长；分段传输还会产生多条 Copilot 消息。原生压缩完成后，主聊天会从 Claude Code 的摘要上下文重新开始。
 
+子代理与同进程 Agent Teams 按原生 session ID、agent ID 和模型区分上下文，每个 agent 使用独立的桥接器标签页并继续自己的聊天。浏览器端模型请求统一排队执行，本地工具仍由 Claude Code 管理。排队等待与生成分别计时；取消未发送的代理请求不会取消正在运行的兄弟代理。当前最多保留 16 个 agent 标签页，结束后可手动关闭；分屏 Agent Teams 仍需单独验证。更新扩展后，`doctor` 的 `capabilities.agentContexts` 应为 `1`。
+
+原生 Auto Mode 已通过有限的真实验收：三位命名队友同时启动后，继续各自完成 Write、Read 和 Bash，无需手动点 Yes；详细范围和限制见[验收记录](docs/public/validation.md)。
+
 ## 常见问题
 
 **扩展未就绪：** 确认网关地址、登录状态、配对工作簿、Copilot 面板和 Chat 模式，检查未发送草稿。重新运行 `doctor`。重建扩展后需重载扩展、刷新工作簿，再使用 **Use selected Excel tab** 恢复现有配对。
@@ -68,6 +72,8 @@ node dist/packages/cli/index.js context-reset --session <native-session-id>
 ```
 
 检查磁盘上是否已经有工具执行的结果，再从 Claude Code 重试。重置不会撤销已执行的操作；网关不会自动重发不确定请求。
+
+如果错误属于子代理，使用错误中提供的 `--agent <agent-id>` 参数，仅重置该代理：`context-reset --session <native-session-id> --agent <agent-id>`。
 
 **PowerShell 阻止脚本：** 使用 `npm.cmd`、`claude.cmd` 避开 npm 的 `.ps1` 启动器。网关启动原生 `claude.exe`；发现失败时，将 `CLAUDE_CODE_EXECUTABLE` 设为它的绝对路径。
 

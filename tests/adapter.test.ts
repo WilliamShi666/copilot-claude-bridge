@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
-import { inspect, replyText, exchange, prepare, modelSubmenu, fill, button } from '../packages/chrome-extension/adapter.js';
+import { inspect, replyText, exchange, prepare, modelSubmenu, fill, button, conversationCursor } from '../packages/chrome-extension/adapter.js';
 function fixture() {
   const dom = new JSDOM('<button aria-label="所选模型: Claude Opus 5.5"></button><button>新建聊天</button><button aria-label="切换模式，当前: 聊天，Ctrl+Shift+M"></button><span contenteditable="true" role="combobox" aria-label="聊天输入"></span><button>发送 ↵</button>');
   dom.window.HTMLElement.prototype.getClientRects = () => ({ length: 1 }) as any;
@@ -140,4 +140,56 @@ test('long insertText can be discarded; virtual paste preserves the complete req
   doc.querySelector('[contenteditable]')!.addEventListener('paste', e => { e.preventDefault(); doc.querySelector('[contenteditable]')!.textContent = (e as any).clipboardData.getData('text/plain'); });
   const prompt = 'FULL_REQUEST_' + 'X'.repeat(70000);
   await fill(doc, prompt); assert.equal(doc.querySelector('[contenteditable]')?.textContent, prompt);
+});
+
+test('visible but disabled model controls are not a ready frame',()=>{
+ const doc=fixture();const selected=doc.querySelector('button')!;selected.setAttribute('disabled','');assert.equal(inspect(doc).ready,false);selected.removeAttribute('disabled');selected.setAttribute('aria-disabled','true');assert.equal(inspect(doc).ready,false);
+});
+
+test('fresh chat waits for the new model selector to be enabled before clicking',async()=>{
+ const doc=fixture(),selected=doc.querySelector<HTMLButtonElement>('button')!;let clicks=0;
+ doc.querySelectorAll<HTMLButtonElement>('button')[1].onclick=()=>{selected.setAttribute('aria-label','所选模型: 自动');selected.disabled=true;setTimeout(()=>{selected.disabled=false;},30);};
+ selected.onclick=()=>{clicks++;const provider=doc.createElement('div');provider.setAttribute('role','menuitem');provider.setAttribute('aria-haspopup','menu');provider.setAttribute('aria-expanded','false');provider.textContent='Claude';provider.onclick=()=>{const item=doc.createElement('div');item.setAttribute('role','menuitemradio');item.textContent='Claude Opus 5.5';item.onclick=()=>selected.setAttribute('aria-label','所选模型: Claude Opus 5.5');doc.body.append(item);};doc.body.append(provider);};
+ await prepare(doc,{id:'disabled-selector',modelLabel:'Claude Opus 5.5',prompt:'x'},AbortSignal.timeout(1000));assert.equal(clicks,1);
+});
+
+test('model option waits for its actual click target to become enabled',async()=>{
+ const doc=fixture(),selected=doc.querySelector<HTMLButtonElement>('button')!;selected.setAttribute('aria-label','所选模型: 自动');let clicks=0;
+ selected.onclick=()=>{const item=doc.createElement('button');item.setAttribute('role','menuitemradio');item.textContent='Claude Opus 5.5';item.disabled=true;item.onclick=()=>{clicks++;selected.setAttribute('aria-label','所选模型: Claude Opus 5.5');};doc.body.append(item);setTimeout(()=>item.disabled=false,30);};
+ await prepare(doc,{id:'disabled-option',modelLabel:'Claude Opus 5.5',prompt:'x'},AbortSignal.timeout(1000));assert.equal(clicks,1);
+});
+
+test('chat-only menu waits for an enabled option before clicking',async()=>{
+ const doc=fixture(),mode=doc.querySelectorAll<HTMLButtonElement>('button')[2];mode.setAttribute('aria-label','切换模式，当前: 编辑，Ctrl+Shift+M');let clicks=0;
+ mode.onclick=()=>{const item=doc.createElement('button');item.textContent='仅聊天';item.disabled=true;item.onclick=()=>{clicks++;mode.setAttribute('aria-label','切换模式，当前: 聊天，Ctrl+Shift+M');};doc.body.append(item);setTimeout(()=>item.disabled=false,30);};
+ await prepare(doc,{id:'disabled-chat-option',modelLabel:'Claude Opus 5.5',prompt:'x'},AbortSignal.timeout(1000));assert.equal(clicks,1);
+});
+
+test('an empty editor reset after commit refills only the unsent prompt and sends once',async()=>{
+ const doc=fixture(),send=doc.querySelectorAll<HTMLButtonElement>('button')[3];let inserts=0,sends=0,journals=0;const prompt='EXACT_PRIVATE_TEST_PROMPT';
+ (doc as any).execCommand=(_cmd:string,_ui:boolean,text:string)=>{inserts++;doc.querySelector('[contenteditable]')!.textContent=text;send.disabled=false;if(inserts===1){const channel=new MessageChannel();channel.port1.onmessage=()=>{doc.querySelector('[contenteditable]')!.textContent='';send.disabled=true;channel.port1.close();channel.port2.close();};channel.port2.postMessage(null);}return true;};
+ send.onclick=()=>{sends++;assert.equal(doc.querySelector('[contenteditable]')!.textContent,prompt);doc.querySelector('[contenteditable]')!.textContent='';doc.body.insertAdjacentHTML('beforeend','<div class="fai-CopilotMessage" role="article"><div class="fai-CopilotMessage__content">{"content":[{"type":"text","text":"done"}]}</div><div role="toolbar"><button>复制</button></div></div>');};
+ const result=await exchange(doc,{id:'editor-reset',modelLabel:'Claude Opus 5.5',prompt},AbortSignal.timeout(1000),async()=>{journals++;});assert.match(result,/done/);assert.equal(inserts,2);assert.equal(sends,1);assert.equal(journals,1);
+});
+
+test('a different draft after commit is never overwritten or sent as the bridge request',async()=>{
+ const doc=fixture(),send=doc.querySelectorAll<HTMLButtonElement>('button')[3];let inserts=0,sends=0,journals=0;
+ (doc as any).execCommand=(_cmd:string,_ui:boolean,text:string)=>{inserts++;doc.querySelector('[contenteditable]')!.textContent=text;const channel=new MessageChannel();channel.port1.onmessage=()=>{doc.querySelector('[contenteditable]')!.textContent='NEW_USER_DRAFT';channel.port1.close();channel.port2.close();};channel.port2.postMessage(null);return true;};
+ send.onclick=()=>{sends++;doc.body.insertAdjacentHTML('beforeend','<div class="fai-CopilotMessage" role="article"><div class="fai-CopilotMessage__content">{"content":[{"type":"text","text":"unexpected"}]}</div><div role="toolbar"><button>复制</button></div></div>');};
+ await assert.rejects(exchange(doc,{id:'changed-draft',modelLabel:'Claude Opus 5.5',prompt:'bridge prompt'},AbortSignal.timeout(1000),async()=>{journals++;}),/input changed|draft/);assert.equal(inserts,1);assert.equal(sends,0);assert.equal(journals,0);assert.equal(doc.querySelector('[contenteditable]')!.textContent,'NEW_USER_DRAFT');
+});
+
+test('editor reset after switching conversations cannot refill or submit into the new chat',async()=>{
+ const doc=fixture(),send=doc.querySelectorAll<HTMLButtonElement>('button')[3];let inserts=0,sends=0,journals=0;
+ (doc as any).execCommand=(_cmd:string,_ui:boolean,text:string)=>{inserts++;doc.querySelector('[contenteditable]')!.textContent=text;const channel=new MessageChannel();channel.port1.onmessage=()=>{doc.querySelector('[contenteditable]')!.textContent='';doc.body.insertAdjacentHTML('beforeend','<div class="fai-UserMessage" role="article"><div class="fai-UserMessage__message">other chat</div></div><div class="fai-CopilotMessage" role="article"><div class="fai-CopilotMessage__content">other reply</div></div>');channel.port1.close();channel.port2.close();};channel.port2.postMessage(null);return true;};
+ send.onclick=()=>{sends++;};
+ await assert.rejects(exchange(doc,{id:'changed-chat',modelLabel:'Claude Opus 5.5',prompt:'bridge prompt'},AbortSignal.timeout(1000),async()=>{journals++;}),/conversation changed/);assert.equal(inserts,1);assert.equal(sends,0);assert.equal(journals,0);
+});
+
+test('final context check cannot send a stale hash into changed messages with equal counts',async()=>{
+ const doc=fixture();doc.body.insertAdjacentHTML('beforeend','<div class="fai-UserMessage" role="article"><div class="fai-UserMessage__message">ORIGINAL_USER</div></div><div class="fai-CopilotMessage" role="article"><div class="fai-CopilotMessage__content">ORIGINAL_REPLY</div><div role="toolbar"><button>复制</button></div></div>');const cursor=await conversationCursor(doc);let armed=false,sends=0,wrongChat=false;
+ const crypto=globalThis.crypto as any,subtle=crypto.subtle,original=subtle.digest.bind(subtle),priorDescriptor=Object.getOwnPropertyDescriptor(crypto,'subtle');
+ Object.defineProperty(crypto,'subtle',{configurable:true,value:{digest:(...args:any[])=>{const pending=original(...args);if(armed){doc.querySelector('.fai-UserMessage__message')!.textContent='CHANGED_USER';doc.querySelector('.fai-CopilotMessage__content')!.textContent='CHANGED_REPLY';}return pending;}}});
+ doc.querySelectorAll<HTMLButtonElement>('button')[3].onclick=()=>{sends++;wrongChat=doc.querySelector('.fai-UserMessage__message')!.textContent!=='ORIGINAL_USER';doc.body.insertAdjacentHTML('beforeend','<div class="fai-CopilotMessage" role="article"><div class="fai-CopilotMessage__content">{"content":[{"type":"text","text":"done"}]}</div><div role="toolbar"><button>复制</button></div></div>');};
+ try{await exchange(doc,{id:'stable-context',modelLabel:'Claude Opus 5.5',prompt:'bridge prompt',conversation:{mode:'continue',id:'11111111-1111-4111-8111-111111111111',title:'test',expectedCursor:cursor}},AbortSignal.timeout(1000),async()=>{armed=true;});assert.equal(sends,1);assert.equal(wrongChat,false);}finally{if(priorDescriptor)Object.defineProperty(crypto,'subtle',priorDescriptor);else delete crypto.subtle;}
 });

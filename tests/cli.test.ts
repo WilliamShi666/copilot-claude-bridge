@@ -11,6 +11,7 @@ test('only child environment changes; stale credentials/providers do not leak to
 });
 test('native model mappings and explicit compact windows are session scoped and validated',()=>{
  const settings=sessionSettings('http://127.0.0.1:59175','local-key','copilot-sonnet-5.5','/tmp/fixture',600000);
+ assert.ok(settings.availableModels.includes('claude-opus-5-5'));assert.ok(settings.availableModels.includes('claude-sonnet-5-5'));assert.ok(settings.availableModels.includes('copilot-sonnet-5.5'));assert.ok(!settings.availableModels.includes('claude-sonnet-5'));
  assert.equal(settings.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW,'600000');
  assert.equal(settings.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE,'');
  assert.equal(settings.modelOverrides['claude-sonnet-5-5'],'copilot-sonnet-5.5');

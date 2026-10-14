@@ -6,15 +6,15 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { BridgeError, parseRequest, buildPrompt, parseReply, toMessage, sseEvents, MODEL_LABELS, type MessagesRequest } from '../protocol/index.js';
 import { ConversationStore } from './conversations.js';
 import type { ConversationCommand,ConversationReceipt,BrowserLane } from '../protocol/conversation.js';
-import {DirectSessions,validSession,type DirectFrame} from './direct-sessions.js';
+import {DirectSessions,validSession,validAgent,type DirectFrame} from './direct-sessions.js';
 import {renderContextPrompt,estimateTokens} from '../protocol/context.js';
 import {contextPackets as segmentContext,type ContextPacket} from '../protocol/transfer.js';
 
 import {SUMMARY_MODELS,isSummaryRequest,validateSummary,type SummaryAttempt} from '../protocol/summary.js';
 import {compactionPrompt,summaryPackets,assertCompactionSummary} from './summary-prompt.js';
 
-interface Options { stateDir: string; port?: number; timeoutMs?: number; maxPromptChars?: number; backend?:'chrome'|'excel-desktop';selectedWindow?:number;onClose?:()=>void }
-interface Job { id: string; kind: 'messages' | 'advice'; phase: 'queued' | 'dispatched' | 'completed' | 'cancelled' | 'failed'; request: MessagesRequest; prompt: string;summary?:boolean;summaryModel?:string;summaryAttempts?:SummaryAttempt[];contextPackets?:ContextPacket[];promptChars?:number;packetCount?:number; session: string; created: string;finished?:string;error?:string;submitted?:boolean;contextKind?:string;contextReason?:string;contextRemovedFields?:string[]; resolve: (text: string) => void; reject: (err: Error) => void; timer?: NodeJS.Timeout; conversation?:ConversationCommand; conversationReceipt?:ConversationReceipt;lane:BrowserLane;directFrame?:DirectFrame }
+interface Options { stateDir: string; port?: number; timeoutMs?: number; queueTimeoutMs?:number; maxPromptChars?: number; backend?:'chrome'|'excel-desktop';selectedWindow?:number;onClose?:()=>void }
+interface Job { workerDispatched?:boolean;dispatchWorker?:WebSocket;readinessRevision?:number; id: string; kind: 'messages' | 'advice'; phase: 'queued' | 'dispatched' | 'completed' | 'cancelled' | 'failed'; request: MessagesRequest; prompt: string;summary?:boolean;summaryModel?:string;summaryAttempts?:SummaryAttempt[];contextPackets?:ContextPacket[];promptChars?:number;packetCount?:number;agentId?:string;agentType?:string;requestClass?:string;runTimeoutMs:number; session: string; created: string;finished?:string;error?:string;submitted?:boolean;contextKind?:string;contextReason?:string;contextRemovedFields?:string[]; resolve: (text: string) => void; reject: (err: Error) => void; timer?: NodeJS.Timeout; conversation?:ConversationCommand; conversationReceipt?:ConversationReceipt;lane:BrowserLane;directFrame?:DirectFrame }
 function nativeSession(req:IncomingMessage,request:MessagesRequest):string|undefined {
  const header=req.headers['x-claude-code-session-id']??req.headers['x-bridge-session'];if(validSession(header))return header;
  try{const metadata=typeof request.metadata?.user_id==='string'?JSON.parse(request.metadata.user_id):request.metadata;if(validSession(metadata?.session_id))return metadata.session_id;}catch{}
@@ -50,38 +50,41 @@ export async function startGateway(options: Options) {
   // Office process/handle; a stale worker must not authenticate to the new service.
   if(desktop){workerToken=randomBytes(32).toString('hex');workerId='';}
   const saveCredentials = () => writeFile(credentialsPath, JSON.stringify({ clientKey, workerToken, pairedOrigin, workerId,backend }), { mode: 0o600 });
-  let active: Job | undefined, completed = 0, lastError: string | null = null, closing = false, conversationControl=false,sessionSyncVersion=0,auxiliaryLanes=false,auxiliaryBootstrap=0,contextPacketSupport=0,summaryRouting=0;
+  let readinessRevision=0;
+  let active: Job | undefined, completed = 0, lastError: string | null = null, closing = false, conversationControl=false,sessionSyncVersion=0,auxiliaryLanes=false,auxiliaryBootstrap=0,contextPacketSupport=0,summaryRouting=0,agentContexts=0,everReady=false;
   const jobs = new Map<string, Job>();
   let persistence = Promise.resolve();
   const ledger = join(options.stateDir, 'dispatch-ledger.json');
   let previousInterrupted = 0;
   try { const previous = JSON.parse(await readFile(ledger, 'utf8')); previousInterrupted = previous.jobs.filter((j: any) => ['queued', 'dispatched'].includes(j.phase)).length; } catch {}
   function persist() {
-    const snapshot = JSON.stringify({ updated: new Date().toISOString(), jobs: [...jobs.values()].map(({ id, phase, created, finished, error, submitted, session, request,lane,contextKind,contextReason,contextRemovedFields,promptChars,packetCount,summary,summaryModel,summaryAttempts }) => ({ id, phase, created, finished, error, submitted, session,lane,contextKind,contextReason,contextRemovedFields,promptChars,packetCount,summary,summaryModel,summaryAttempts, model: request.model })) });
+    const snapshot = JSON.stringify({ updated: new Date().toISOString(), jobs: [...jobs.values()].map(({ id, phase, created, finished, error, submitted, session, request,lane,contextKind,contextReason,contextRemovedFields,promptChars,packetCount,summary,summaryModel,summaryAttempts,agentId,agentType,requestClass }) => ({ id, phase, created, finished, error, submitted, session,lane,contextKind,contextReason,contextRemovedFields,promptChars,packetCount,summary,summaryModel,summaryAttempts,agentId,agentType,requestClass, model: request.model })) });
     persistence = persistence.then(async () => { const temp = ledger + '.tmp'; await writeFile(temp, snapshot, { mode: 0o600 }); await rename(temp, ledger); });
     return persistence;
   }
-  const status = () => ({ pid: process.pid,backend,selectedWindow:desktop?options.selectedWindow:undefined, paired: !!workerToken, workerConnected: !!worker && worker.readyState === WebSocket.OPEN, browserReady: ready, active: active ? { id: active.id, phase: active.phase, model: active.request.model,lane:active.lane,promptChars:active.promptChars,packetCount:active.packetCount } : null, queued: [...jobs.values()].filter(j => j.phase === 'queued').length, completed, previousInterrupted, lastError, usage: sessionSyncVersion===1?'estimated':'unavailable',billing:'unavailable', transport: desktop?'excel-desktop-uia':'copilot-ui-json', capabilities: { text: true, clientTools: true, media: false, promptCache: false, apiReasoningControls: false, conversationControl,sessionSyncVersion,auxiliaryLanes,auxiliaryBootstrap,contextPackets:contextPacketSupport,summaryRouting,summaryModels:SUMMARY_MODELS,foregroundInput:desktop },nativeContexts:direct.list() });
+  const status = () => ({ pid: process.pid,backend,selectedWindow:desktop?options.selectedWindow:undefined, paired: !!workerToken, workerConnected: !!worker && worker.readyState === WebSocket.OPEN, browserReady: ready, active: active ? { id: active.id, phase: active.phase, model: active.request.model,lane:active.lane,agentId:active.agentId,promptChars:active.promptChars,packetCount:active.packetCount } : null, queued: [...jobs.values()].filter(j => j.phase === 'queued').length, completed, previousInterrupted, lastError, usage: sessionSyncVersion===1?'estimated':'unavailable',billing:'unavailable', transport: desktop?'excel-desktop-uia':'copilot-ui-json', capabilities: { text: true, clientTools: true, media: false, promptCache: false, apiReasoningControls: false, conversationControl,sessionSyncVersion,auxiliaryLanes,auxiliaryBootstrap,contextPackets:contextPacketSupport,summaryRouting,summaryModels:SUMMARY_MODELS,agentContexts,foregroundInput:desktop },nativeContexts:direct.list() });
   function send(message: unknown) { if (worker?.readyState === WebSocket.OPEN) worker.send(JSON.stringify(message)); }
   async function dispatch() {
     if (closing || active || !ready || worker?.readyState !== WebSocket.OPEN) return;
     const job = [...jobs.values()].find(j => j.phase === 'queued'); if (!job) return;
-    active = job; job.phase = 'dispatched'; ready = false;
-    try { await persist(); send({ type: 'job', id: job.id, model: job.request.model, modelLabel: job.summary?SUMMARY_MODELS[0]:MODEL_LABELS[job.request.model],...(job.summary?{summary:true}:{}), prompt: job.contextPackets?.[0].prompt??job.prompt,...(job.contextPackets?{contextPackets:job.contextPackets}:{}),lane:job.lane, ...(job.conversation?{conversation:job.conversation}:{}) }); }
-    catch { finish(job, new BridgeError('Could not persist dispatch state', 500, 'api_error')); }
+    active = job; job.phase = 'dispatched'; job.dispatchWorker=worker;job.readinessRevision=readinessRevision;ready = false;clearTimeout(job.timer);job.timer=setTimeout(()=>expire(job),job.runTimeoutMs);
+    try { await persist(); if(closing||job.phase!=='dispatched'||active?.id!==job.id)return;if(worker!==job.dispatchWorker||worker?.readyState!==WebSocket.OPEN)throw new Error('Worker changed before submission');job.workerDispatched=true;send({ type: 'job', id: job.id, model: job.request.model, modelLabel: job.summary?SUMMARY_MODELS[0]:MODEL_LABELS[job.request.model],...(job.summary?{summary:true}:{}), prompt: job.contextPackets?.[0].prompt??job.prompt,...(job.contextPackets?{contextPackets:job.contextPackets}:{}),lane:job.lane, ...(job.conversation?{conversation:job.conversation}:{}) }); }
+    catch (error) { finish(job, new BridgeError(error instanceof Error?error.message:'Could not persist dispatch state', 500, 'api_error')); }
   }
+  function expire(job:Job){if(!['queued','dispatched'].includes(job.phase))return;const dispatched=job.phase==='dispatched';if(job.workerDispatched)send({type:'cancel',id:job.id,lane:job.lane});finish(job,new BridgeError(dispatched?'Copilot request timed out; it was not automatically resubmitted':'Browser queue wait timed out before submission',504,'api_error'));}
   function finish(job: Job, error?: Error, text?: string) {
     if (!['queued', 'dispatched'].includes(job.phase)) return;
     clearTimeout(job.timer);
     const dispatched=job.phase==='dispatched';job.phase = error ? (error.name === 'AbortError' ? 'cancelled' : 'failed') : 'completed';job.finished=new Date().toISOString();
     if(error){let diagnostic=error.message;for(const secret of [clientKey,workerToken,pairCode])if(secret)diagnostic=diagnostic.replaceAll(secret,'[local credential]');job.error=diagnostic.slice(0,2000);}
-    const uncertain=dispatched&&job.submitted!==false;
+    const uncertain=!!job.workerDispatched&&job.submitted!==false;
+    if(dispatched&&!job.workerDispatched&&job.dispatchWorker===worker&&job.readinessRevision===readinessRevision&&worker?.readyState===WebSocket.OPEN&&!closing)ready=true;
     if(error&&job.directFrame)void direct.fail(job.directFrame,uncertain).catch(()=>{lastError='Native context persistence failed';});
-    if (error) { lastError = error.message; if(job.conversation)void (uncertain?conversations.fail(job.conversation.id,job.id):conversations.cancelBeforeDispatch(job.conversation.id,job.id)).catch(()=>{lastError='Conversation metadata persistence failed';});if(job.lane==='auxiliary'&&validSession(job.session)&&direct.compacting(job.session))void direct.abortCompact(job.session).catch(()=>{});job.reject(error); } else { lastError = null; completed++; job.resolve(text!); }
+    if (error) { lastError = error.message; if(job.conversation)void (uncertain?conversations.fail(job.conversation.id,job.id):conversations.cancelBeforeDispatch(job.conversation.id,job.id)).catch(()=>{lastError='Conversation metadata persistence failed';});if(job.lane==='auxiliary'&&validSession(job.session)&&direct.compacting(job.session,job.agentId))void direct.abortCompact(job.session,job.agentId).catch(()=>{});job.reject(error); } else { lastError = null; completed++; job.resolve(text!); }
     if (active?.id === job.id) active = undefined;
     // Do not retain source text/history in completed job objects or persisted metadata.
     job.prompt = ''; job.contextPackets=undefined; job.request = { model: job.request.model, max_tokens: 1, messages: [] };
-    job.directFrame=undefined;
+    job.directFrame=undefined;job.dispatchWorker=undefined;
     void persist().then(dispatch).catch(() => { lastError = 'Ledger persistence failed'; });
     const done = [...jobs.values()].filter(j => !['queued', 'dispatched'].includes(j.phase));
     for (const old of done.slice(0, Math.max(0, done.length - 100))) jobs.delete(old.id);
@@ -113,9 +116,9 @@ export async function startGateway(options: Options) {
       if(path==='/bridge/context/status'&&req.method==='GET'){json(res,200,{contexts:direct.list(new URL(req.url!,'http://'+host).searchParams.get('session')??undefined),usage:'estimated',billing:'unavailable'});return;}
       if(path==='/bridge/context/compact'&&req.method==='POST'){
         const event=await body(req);if(!['PreCompact','PostCompact'].includes(event.hook_event_name)||!['manual','auto'].includes(event.trigger)||!validSession(event.session_id))throw new BridgeError('Invalid native compaction event');
-        await direct.compact(event.session_id,event.workspaceKey,event.hook_event_name,event.trigger);json(res,200,{accepted:true});return;
+        await direct.compact(event.session_id,event.workspaceKey,event.hook_event_name,event.trigger,event.agent_id);json(res,200,{accepted:true});return;
       }
-      if(path==='/bridge/context/reset'&&req.method==='POST'){const value=await body(req);await direct.reset(value.session_id);json(res,200,{reset:true});return;}
+      if(path==='/bridge/context/reset'&&req.method==='POST'){const value=await body(req);await direct.reset(value.session_id,value.agent_id);json(res,200,{reset:true});return;}
       if(path==='/bridge/conversations'&&req.method==='GET'){json(res,200,{conversations:conversations.list(new URL(req.url!,'http://'+host).searchParams.get('workspaceKey')??'')});return;}
       if (path === '/bridge/stop' && req.method === 'POST') { if(active||[...jobs.values()].some(j=>j.phase==='queued'))throw new BridgeError('Gateway is busy; stop only after active requests finish',409);json(res, 200, { stopping: true }); setTimeout(() => { void close(); }, 50); return; }
       if (path === '/api/hello' && req.method === 'HEAD') { res.writeHead(200); res.end(); return; }
@@ -133,16 +136,21 @@ export async function startGateway(options: Options) {
       const workspaceHeader=req.headers['x-bridge-workspace-key'];
       const workspaceKey=typeof workspaceHeader==='string'&&/^[a-f0-9]{64}$/.test(workspaceHeader)?workspaceHeader:createHash('sha256').update('native:'+session).digest('hex');
       const requestClass=req.headers['x-claude-code-request-class'];
+      const agentHeader=advisory?undefined:req.headers['x-claude-code-agent-id'];if(agentHeader!==undefined&&!validAgent(agentHeader))throw new BridgeError('Invalid native agent identity');const agentId=typeof agentHeader==='string'?agentHeader:undefined;
+      if(!advisory&&(requestClass==='subagent'||requestClass==='workflow')&&!agentId)throw new BridgeError('Native agent identity is missing; agent contexts cannot be mixed');
+      if(agentId&&(!session||agentContexts!==1))throw new BridgeError('Reload the Chrome bridge extension to enable isolated native agent contexts. Nothing was submitted.',503,'api_error');
+      const nativeAgentType=req.headers['x-claude-code-agent-type'];const agentType=typeof nativeAgentType==='string'&&/^[A-Za-z0-9._-]{1,64}$/.test(nativeAgentType)?nativeAgentType:undefined;
       const compactHint=req.headers['x-claude-code-compaction'];
       const contextCompacted=['auto','manual','reactive'].includes(String(req.headers['x-claude-code-context-compacted']??''));
       const auxiliaryClass=requestClass==='auxiliary'||requestClass==='compaction'||['auto','manual','reactive'].includes(String(compactHint??''));
-      if(session&&syncing&&direct.compacting(session)&&!auxiliaryClass&&(requestClass==='main'||request.tools?.length))await direct.abortCompact(session);
-      const lane:BrowserLane=syncing&&(advisory||!session||auxiliaryClass||(requestClass!=='main'&&(!Array.isArray(request.tools)||direct.compacting(session))))?'auxiliary':'main';
-      const summary=!advisory&&lane==='auxiliary'&&isSummaryRequest(requestClass,compactHint,!!session&&direct.compacting(session));
+      if(session&&syncing&&direct.compacting(session,agentId)&&!auxiliaryClass&&(requestClass==='main'||request.tools?.length))await direct.abortCompact(session,agentId);
+      let lane:BrowserLane=syncing&&(advisory||!session||auxiliaryClass||(requestClass!=='main'&&(!Array.isArray(request.tools)||direct.compacting(session,agentId))))?'auxiliary':'main';if(agentId&&!auxiliaryClass)lane='main';
+      const summary=!advisory&&lane==='auxiliary'&&isSummaryRequest(requestClass,compactHint,!!session&&direct.compacting(session,agentId));
       if(summary&&summaryRouting!==1)throw new BridgeError('Reload the Chrome bridge extension to enable summary model routing. Nothing was submitted.',503,'api_error');
       const jobId=randomUUID();reservationJobId=jobId;let conversation:ConversationCommand|undefined;
-      if(!advisory&&session&&lane==='main')directFrame=await direct.prepare(session,workspaceKey,request,jobId,contextCompacted);
-      if(directFrame)conversation=await conversations.reserve({mode:directFrame.conversationId?'continue':'new',...(directFrame.conversationId?{id:directFrame.conversationId}:{}),workspaceKey,lane:'main'},request.model,jobId);
+      if(!advisory&&session&&lane!=='auxiliary')directFrame=await direct.prepare(session,workspaceKey,request,jobId,contextCompacted,agentId);
+      if(directFrame&&agentId)lane=`agent:${directFrame.key}`;
+      if(directFrame)conversation=await conversations.reserve({mode:directFrame.conversationId?'continue':'new',...(directFrame.conversationId?{id:directFrame.conversationId}:{}),workspaceKey,lane},request.model,jobId);
       else if(advisory&&input.conversation)conversation=await conversations.reserve({...input.conversation,lane},request.model,jobId);
       reservedConversation=conversation;
       const sourcePrompt = advisory ? (input.conversation?'请只提供规划、指导或审阅建议，不编辑工作簿，不执行本地命令。只读文件助手会执行明确的阅读材料请求。请遵守下方的回复格式。\n':'请只在聊天中提供规划或审查建议。不要编辑工作簿，也不要运行或调用任何本地工具。请正常输出建议文本，不必输出 JSON。\n') + input.prompt : directFrame?renderContextPrompt(request,directFrame.plan,directFrame.epoch,options.maxPromptChars):buildPrompt(request,options.maxPromptChars);
@@ -150,16 +158,16 @@ export async function startGateway(options: Options) {
       const sourcePackets=!desktop&&!advisory?segmentContext(prompt,jobId):undefined;
       const packets=summary?summaryPackets(sourcePackets):sourcePackets;
       if(packets&&contextPacketSupport!==1)throw new BridgeError('Reload the Chrome bridge extension to enable segmented long-context transfer. Nothing was submitted.',503,'api_error');
-      if ((!ready && !active) || worker?.readyState !== WebSocket.OPEN) throw new BridgeError('Connect the selected Copilot adapter with a ready chat first.', 503, 'api_error');
+      if ((!ready && !active && !everReady) || worker?.readyState !== WebSocket.OPEN) throw new BridgeError('Connect the selected Copilot adapter with a ready chat first.', 503, 'api_error');
       if ([...jobs.values()].filter(j => ['queued', 'dispatched'].includes(j.phase)).length >= 16) throw new BridgeError('Browser queue is full', 429, 'rate_limit_error');
-      if(res.destroyed){if(conversation)await conversations.fail(conversation.id,jobId);throw new BridgeError('Client disconnected before submission',499,'api_error');}
+      if(res.destroyed){throw new BridgeError('Client disconnected before submission',499,'api_error');}
       let resolve!: (text: string) => void, reject!: (err: Error) => void;
       const result = new Promise<string>((yes, no) => { resolve = yes; reject = no; });
-      job = { id: jobId, kind: advisory ? 'advice' : 'messages', phase: 'queued', request, prompt,summary,contextPackets:packets,promptChars:prompt.length,packetCount:packets?.length??1, session: session??'anonymous', created: new Date().toISOString(), resolve, reject, conversation,lane,directFrame,contextKind:directFrame?.plan.kind,contextReason:directFrame?.plan.reason,contextRemovedFields:directFrame?.plan.removedFields };
+      job = { id: jobId, kind: advisory ? 'advice' : 'messages', phase: 'queued', request, prompt,summary,agentId,agentType,requestClass:typeof requestClass==='string'&&/^[A-Za-z0-9_-]{1,64}$/.test(requestClass)?requestClass:undefined,runTimeoutMs:options.timeoutMs??Math.max(240000,(packets?.length??0)*45000+180000)*(summary?SUMMARY_MODELS.length:1),contextPackets:packets,promptChars:prompt.length,packetCount:packets?.length??1, session: session??'anonymous', created: new Date().toISOString(), resolve, reject, conversation,lane,directFrame,contextKind:directFrame?.plan.kind,contextReason:directFrame?.plan.reason,contextRemovedFields:directFrame?.plan.removedFields };
       jobs.set(job.id, job);
-      const cancel = () => { if (job && ['queued', 'dispatched'].includes(job.phase)) { send({ type: 'cancel', id: job.id }); const error = new Error('Client disconnected; browser request cancelled'); error.name = 'AbortError'; finish(job, error); } };
+      const cancel = () => { if (job && ['queued', 'dispatched'].includes(job.phase)) { if(job.workerDispatched)send({ type: 'cancel', id: job.id,lane:job.lane }); const error = new Error('Client disconnected; browser request cancelled'); error.name = 'AbortError'; finish(job, error); } };
       res.once('close', () => { if (!res.writableEnded) cancel(); });
-      job.timer = setTimeout(() => { send({ type: 'cancel', id: job!.id }); finish(job!, new BridgeError('Copilot request timed out; it was not automatically resubmitted', 504, 'api_error')); }, options.timeoutMs ?? Math.max(240000,(packets?.length??0)*45000+180000)*(summary?SUMMARY_MODELS.length:1));
+      job.timer=setTimeout(()=>expire(job!),options.queueTimeoutMs??900000);
       res.setHeader('x-bridge-usage', session&&syncing?'estimated':'unavailable');res.setHeader('x-bridge-billing','unavailable'); res.setHeader('x-bridge-transport', 'copilot-ui-json'); res.setHeader('request-id', job.id);
       if(directFrame){res.setHeader('x-bridge-context-epoch',String(directFrame.epoch));res.setHeader('x-bridge-context-kind',directFrame.plan.kind);}
       if (request.stream) {
@@ -200,15 +208,15 @@ export async function startGateway(options: Options) {
           if (value.type !== 'hello' || typeof value.token !== 'string' || !sameSecret(value.token, workerToken) || typeof value.workerId !== 'string') throw new Error('Invalid worker authentication');
           if (worker && worker !== ws) worker.close(1000, 'Reconnected');
           if (workerId && workerId !== value.workerId) throw new Error('Different paired worker');
-          authenticated = true; clearTimeout(authTimer); worker = ws; workerId = value.workerId; ready = value.ready === true;conversationControl=value.conversationControl===true&&value.conversationResumability==='active-chat-only';sessionSyncVersion=value.sessionSyncVersion===1?1:0;auxiliaryLanes=value.auxiliaryLanes===true;auxiliaryBootstrap=value.auxiliaryBootstrap===1?1:0;contextPacketSupport=value.contextPackets===1?1:0;summaryRouting=value.summaryRouting===1?1:0;
+          authenticated = true; clearTimeout(authTimer); worker = ws; workerId = value.workerId;readinessRevision++;ready = value.ready === true;everReady=ready;conversationControl=value.conversationControl===true&&value.conversationResumability==='active-chat-only';sessionSyncVersion=value.sessionSyncVersion===1?1:0;auxiliaryLanes=value.auxiliaryLanes===true;auxiliaryBootstrap=value.auxiliaryBootstrap===1?1:0;contextPacketSupport=value.contextPackets===1?1:0;summaryRouting=value.summaryRouting===1?1:0;agentContexts=value.agentContexts===1?1:0;
           await saveCredentials();
           send({ type: 'connected', activeId: active?.id ?? null });
-          if (active) send({ type: 'recover', id: active.id,lane:active.lane }); else void dispatch();
+          if (active?.workerDispatched) send({ type: 'recover', id: active.id,lane:active.lane }); else void dispatch();
           return;
         }
         if (worker !== ws) return;
         if (value.type === 'ping') { send({ type: 'pong' }); return; }
-        if (value.type === 'ready') { ready = value.ready === true;if(value.conversationControl!==undefined)conversationControl=value.conversationControl===true&&value.conversationResumability==='active-chat-only';if(value.sessionSyncVersion!==undefined)sessionSyncVersion=value.sessionSyncVersion===1?1:0;if(value.auxiliaryLanes!==undefined)auxiliaryLanes=value.auxiliaryLanes===true;if(value.auxiliaryBootstrap!==undefined)auxiliaryBootstrap=value.auxiliaryBootstrap===1?1:0;if(value.contextPackets!==undefined)contextPacketSupport=value.contextPackets===1?1:0;if(value.summaryRouting!==undefined)summaryRouting=value.summaryRouting===1?1:0;void dispatch(); return; }
+        if (value.type === 'ready') { readinessRevision++;ready = value.ready === true;if(ready)everReady=true;if(value.conversationControl!==undefined)conversationControl=value.conversationControl===true&&value.conversationResumability==='active-chat-only';if(value.sessionSyncVersion!==undefined)sessionSyncVersion=value.sessionSyncVersion===1?1:0;if(value.auxiliaryLanes!==undefined)auxiliaryLanes=value.auxiliaryLanes===true;if(value.auxiliaryBootstrap!==undefined)auxiliaryBootstrap=value.auxiliaryBootstrap===1?1:0;if(value.contextPackets!==undefined)contextPacketSupport=value.contextPackets===1?1:0;if(value.summaryRouting!==undefined)summaryRouting=value.summaryRouting===1?1:0;if(value.agentContexts!==undefined)agentContexts=value.agentContexts===1?1:0;void dispatch(); return; }
         if (value.type === 'result' || value.type === 'failure') {
           const job = jobs.get(value.id);
           if (!job || job.phase !== 'dispatched') { send({ type: 'ack', id: value.id, discarded: true }); return; }
@@ -236,7 +244,7 @@ export async function startGateway(options: Options) {
         else if (active) finish(active, new BridgeError(message, 502, 'api_error'));
       }
     });
-    ws.on('close', () => { clearTimeout(authTimer); if (worker === ws) { worker = undefined; ready = false;conversationControl=false;sessionSyncVersion=0;auxiliaryLanes=false;auxiliaryBootstrap=0;contextPacketSupport=0;summaryRouting=0; } });
+    ws.on('close', () => { clearTimeout(authTimer); if (worker === ws) { worker = undefined; readinessRevision++;ready = false;everReady=false;agentContexts=0;conversationControl=false;sessionSyncVersion=0;auxiliaryLanes=false;auxiliaryBootstrap=0;contextPacketSupport=0;summaryRouting=0; } });
     ws.on('error', () => {});
   });
   await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(options.port ?? 59173, '127.0.0.1', resolve); });

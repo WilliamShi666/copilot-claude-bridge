@@ -4,6 +4,8 @@ Claude Code remains the source of the conversation. Its request contains the sys
 
 The main lane bootstraps full context once, then sends appended messages and changed request fields to the verified active Copilot chat. A changed tool list can still produce a large update. The bridge compares the current browser conversation fingerprint before continuing. It does not restore arbitrary old Office chats from the history sidebar. Keep one active main client session per paired workbook.
 
+Subagents and in-process teammates use native `x-claude-code-agent-id` together with session ID and model. Their independent leases, snapshots, browser lanes and owned tabs preserve continuation when another agent takes its turn. Agent compaction hints and hook events are scoped to the requesting agent. Model requests queue globally; queued requests have a bounded wait budget separate from their generation timeout. A canceled queued request is never sent to the browser. Overlapping main requests for the same session/agent/model still fail rather than mixing histories.
+
 Title requests and native compaction run in bridge-owned auxiliary browser tabs/chats. They do not append to the main conversation. Seeing these additional sessions in Copilot is expected. A long source is transmitted in ordered packets, each acknowledged before the next is sent. The final packet asks for the actual response; intermediate acknowledgments are not native model answers. The UI packet cap is 350,000 characters; serialized escaping reduces each packet's available source capacity. Source text is not silently truncated.
 
 ## Thresholds
@@ -25,3 +27,5 @@ Sending the full pre-compaction source can take several UI messages and minutes.
 ## Uncertain delivery
 
 The bridge records dispatch before submission and does not automatically replay an interrupted request that may have reached Copilot. A 409 uncertain-context error requires an explicit `context-reset --session <native-session-id>` after finishing/canceling the active request. Check actual tool effects before retrying. Resetting context tracking does not roll back files, commands or native history.
+
+The launcher lists only the supported Opus/Sonnet 5.5 native IDs and their Copilot deployment IDs in session-only `availableModels`. This keeps native model selection and Auto-mode classifier routing within the gateway model set. The native classifier remains responsible for each permission decision. Saved global provider/permission settings are not edited.

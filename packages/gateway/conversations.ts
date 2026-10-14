@@ -1,11 +1,12 @@
+import {validBrowserLane} from '../protocol/conversation.js';
 import { readFile, writeFile, rename } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { BridgeError } from '../protocol/index.js';
-import type { ConversationCommand, ConversationReceipt, ConversationSelection } from '../protocol/conversation.js';
-const selectionSchema=z.object({mode:z.enum(['new','continue']),id:z.string().uuid().optional(),workspaceKey:z.string().regex(/^[a-f0-9]{64}$/),lane:z.enum(['main','auxiliary']).optional()}).strict();
-const recordSchema=z.object({id:z.string().uuid(),title:z.string().max(60),workspaceKey:z.string().regex(/^[a-f0-9]{64}$/),model:z.string(),lane:z.enum(['main','auxiliary']).default('main'),cursor:z.string().regex(/^[a-f0-9]{64}$/).optional(),state:z.enum(['ready','inactive','busy','uncertain']),jobId:z.string().optional(),updated:z.string()});
+import type {BrowserLane, ConversationCommand, ConversationReceipt, ConversationSelection } from '../protocol/conversation.js';
+const selectionSchema=z.object({mode:z.enum(['new','continue']),id:z.string().uuid().optional(),workspaceKey:z.string().regex(/^[a-f0-9]{64}$/),lane:z.custom<BrowserLane>(validBrowserLane).optional()}).strict();
+const recordSchema=z.object({id:z.string().uuid(),title:z.string().max(60),workspaceKey:z.string().regex(/^[a-f0-9]{64}$/),model:z.string(),lane:z.custom<BrowserLane>(validBrowserLane).default('main'),cursor:z.string().regex(/^[a-f0-9]{64}$/).optional(),state:z.enum(['ready','inactive','busy','uncertain']),jobId:z.string().optional(),updated:z.string()});
 type Record=z.infer<typeof recordSchema>;
 export class ConversationStore {
   private records=new Map<string,Record>(); private persistence=Promise.resolve();
@@ -54,7 +55,7 @@ export class ConversationStore {
     record.state='uncertain';delete record.jobId;record.updated=new Date().toISOString();await this.persist();
   }
   async cancelBeforeDispatch(id:string,jobId:string){const record=this.records.get(id);if(!record||record.jobId!==jobId)return;record.state=record.cursor?'ready':'inactive';delete record.jobId;record.updated=new Date().toISOString();await this.persist();}
-  async invalidateLane(lane:'main'|'auxiliary'){for(const record of this.records.values())if(record.lane===lane&&record.state==='ready')record.state='inactive';await this.persist();}
+  async invalidateLane(lane:BrowserLane){for(const record of this.records.values())if(record.lane===lane&&record.state==='ready')record.state='inactive';await this.persist();}
   list(workspaceKey:string) {
     if(!/^[a-f0-9]{64}$/.test(workspaceKey))throw new BridgeError('Workspace key required',400);
     return [...this.records.values()].filter(r=>r.workspaceKey===workspaceKey).sort((a,b)=>b.updated.localeCompare(a.updated)).map(({id,title,model,state,updated})=>({conversationId:id,label:title,model,state,updated,resumability:'active-chat-only'}));
