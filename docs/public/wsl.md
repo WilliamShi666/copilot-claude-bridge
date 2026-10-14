@@ -36,7 +36,7 @@ Proceed only when `doctor` shows `workerConnected: true` and `browserReady: true
 
 If Chrome cannot connect, check that Windows can reach the loopback URL, WSL is running, localhost forwarding is enabled, and the selected port is not occupied by a Windows service. Keep the gateway bound to `127.0.0.1`; changing it to a LAN address is not a supported workaround.
 
-Do not share `node_modules` between Windows and WSL. Dependencies such as esbuild install a platform-specific binary. WSL state is in the Linux user's `~/.m365-claude-bridge`, separate from Windows state. The generic foreground instructions above do not install a system service or depend on a particular Linux username.
+Do not share `node_modules` between Windows and WSL. Dependencies such as esbuild install a platform-specific binary. WSL state is in the Linux user's `~/.m365-claude-bridge`, separate from Windows state. The repository launcher instructions above do not install a system service or depend on a particular Linux username.
 
 After installing and pairing, you may run the local CLI from Windows with `wsl.exe -d Ubuntu --cd <checkout-path> -- node dist/packages/cli/index.js run --experimental-copilot-backend --cwd <linux-workspace>`. Replace paths with your own installation. Run `stop` inside the same WSL environment when finished.
 

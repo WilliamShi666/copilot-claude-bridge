@@ -2,7 +2,7 @@
 
 [English](startup.en.md) · [返回仓库主页](../../README.md)
 
-需要 Microsoft 365 Premium、在本地 Chrome 登录的网页版 Excel、工作簿中可用的 Claude 模型，以及原生 Claude Code。保持工作簿和 Copilot 的 Chat 模式打开。桌面 Excel 不支持这里的直接模型桥接。
+个人账号需要 Microsoft 365 Premium；具备相应权限的商业订阅见 [使用前提](../../README.md#使用前提)。还需要在本地 Chrome 登录的网页版 Excel、工作簿中可用的 Claude 模型，以及原生 Claude Code。保持工作簿和 Copilot 的 Chat 模式打开。桌面 Excel 不支持这里的直接模型桥接。
 
 ## 首次安装：Windows
 

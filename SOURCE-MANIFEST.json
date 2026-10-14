@@ -90,8 +90,8 @@
     },
     {
       "path": "docs/public/startup.md",
-      "bytes": 9307,
-      "sha256": "3d9db1f3f139d6768d5af0de7c090d64b09b44330ecbf690bfb61380161e2bdc"
+      "bytes": 9412,
+      "sha256": "0c3fcbe185f01b1da3c5622f7e971ae0e87638beed1e1bdcc609eceaf12472e3"
     },
     {
       "path": "docs/public/validation.md",
@@ -100,8 +100,8 @@
     },
     {
       "path": "docs/public/wsl.md",
-      "bytes": 3578,
-      "sha256": "b953d8f7bb62ddc319e0d12869dada83a46ecc7bd9aac1f35cc68775a9ba0cd7"
+      "bytes": 3579,
+      "sha256": "e370b6f6d50736697814e12ace211d069a9936ff649c79b8991b0b0e6912db7e"
     },
     {
       "path": "package-lock.json",
