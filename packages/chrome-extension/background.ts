@@ -1,10 +1,10 @@
 import { OFFICE_ORIGINS, pairingCoordinator, type PairIntent } from './pairing.js';
-import type { ConversationReceipt } from '../protocol/conversation.js';
+import {validBrowserLane,type BrowserLane,type ConversationReceipt} from '../protocol/conversation.js';
 import {AuxiliaryTabs,type AuxiliaryBinding} from './auxiliary-tabs.js';
-interface Config { url: string; token: string; workerId: string; tabId: number;workbookUrl?:string; frameId?: number; ready?: boolean;conversationControl?:boolean;auxiliary?:AuxiliaryBinding }
+interface Config { url: string; token: string; workerId: string; tabId: number;workbookUrl?:string; frameId?: number; ready?: boolean;conversationControl?:boolean;auxiliary?:AuxiliaryBinding;agents?:Record<string,AuxiliaryBinding> }
 let socket: WebSocket | undefined, config: Config | undefined;
 let reconnecting = false;
-let busyLane:{id:string;lane:'main'|'auxiliary'}|undefined;
+let busyLane:{id:string;lane:BrowserLane}|undefined;
 const canceledJobs=new Set<string>();
 const inFlightJobs=new Set<string>(),settledJobs=new Set<string>();
 const pending = new Map<string, { type: string; id: string; text?: string; error?: string;conversation?:ConversationReceipt }>();
@@ -15,19 +15,22 @@ async function load() { config = (await chrome.storage.local.get('config')).conf
 async function save() { await chrome.storage.local.set({ config }); }
 async function uiStatus(error?: string) { await chrome.storage.local.set({ status: { connected: socket?.readyState === WebSocket.OPEN, ready: config?.ready === true&&!busyLane, tabId: config?.tabId, frameId: config?.frameId,sessionSyncVersion:1,auxiliaryTabId:config?.auxiliary?.tabId, error: error ?? null, updated: Date.now() } }); }
 function send(value: unknown) { if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(value)); }
-const auxiliary=new AuxiliaryTabs({
- primary:async()=>{if(!config)throw new Error('No paired workbook');const tab=await chrome.tabs.get(config.tabId);const url=tab.url??config.workbookUrl;if(!url)throw new Error('Open the extension popup and use the selected Excel tab once to save its workbook address');if(tab.url){config.workbookUrl=tab.url;await save();}return{tabId:config.tabId,url};},
- binding:()=>config?.auxiliary,
- save:async value=>{if(config){config.auxiliary=value;await save();}},
+function ownedBinding(lane:BrowserLane){return lane==='auxiliary'?config?.auxiliary:config?.agents?.[lane];}
+function laneForTab(tabId:number|undefined):BrowserLane|undefined{if(!config)return;if(tabId===config.tabId)return 'main';if(tabId===config.auxiliary?.tabId)return 'auxiliary';return Object.keys(config.agents??{}).find(lane=>config!.agents![lane].tabId===tabId) as BrowserLane|undefined;}
+function makeOwnedTabs(lane:BrowserLane){return new AuxiliaryTabs({
+ primary:async()=>{if(!config)throw new Error('No paired workbook');if(lane.startsWith('agent:')&&!ownedBinding(lane)&&Object.keys(config.agents??{}).length>=16)throw new Error('Agent tab limit reached; close finished bridge-owned agent tabs first');const tab=await chrome.tabs.get(config.tabId);const url=tab.url??config.workbookUrl;if(!url)throw new Error('Open the extension popup and use the selected Excel tab once to save its workbook address');if(tab.url){config.workbookUrl=tab.url;await save();}return{tabId:config.tabId,url};},
+ binding:()=>ownedBinding(lane),
+ save:async value=>{if(config){if(lane==='auxiliary')config.auxiliary=value;else{config.agents??={};if(value)config.agents[lane]=value;else delete config.agents[lane];}await save();}},
  create:async url=>await chrome.tabs.create({url,active:false}),get:async id=>await chrome.tabs.get(id),
  activate:async id=>{await chrome.tabs.update(id,{active:true});},
  inject:async id=>{
-   const host=officeFrames.get(id);
-   if(host&&config?.auxiliary?.tabId===id){
-     if(config.auxiliary.documentKey&&host.documentKey!==config.auxiliary.documentKey)throw new Error('Auxiliary document identity changed');
+   const host=officeFrames.get(id),binding=ownedBinding(lane),frameId=binding?.tabId===id?binding.frameId:undefined;
+   // A ready add-in already owns this pane. Reopening the host can toggle it closed.
+   if(frameId!==undefined){const state=await chrome.tabs.sendMessage(id,{type:'inspect'},{frameId}).catch(()=>undefined);if(state?.ready===true)return;}
+   if(host&&binding?.tabId===id){
+     if(binding.documentKey&&host.documentKey!==binding.documentKey)throw new Error('Auxiliary document identity changed');
      await chrome.tabs.sendMessage(id,{type:'office-open-copilot'},{frameId:host.frameId});
    }
-   const frameId=config?.auxiliary?.tabId===id?config.auxiliary.frameId:undefined;
    if(frameId!==undefined)await chrome.scripting.executeScript({target:{tabId:id,frameIds:[frameId]},files:['content.js']});
  },remove:async id=>await chrome.tabs.remove(id),
  identity:async id=>{
@@ -42,20 +45,23 @@ const auxiliary=new AuxiliaryTabs({
    }});
    return results.map(r=>r.result).find((value):value is string=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value));
  },
-});
-function announceReady(){send({type:'ready',ready:config?.ready===true&&!busyLane,conversationControl:config?.conversationControl===true,conversationResumability:'active-chat-only',sessionSyncVersion:1,auxiliaryLanes:true,auxiliaryBootstrap:1,contextPackets:1,summaryRouting:1});}
+});}
+const auxiliary=makeOwnedTabs('auxiliary'),agentManagers=new Map<BrowserLane,AuxiliaryTabs>();
+function ownedManager(lane:BrowserLane){if(lane==='auxiliary')return auxiliary;if(!validBrowserLane(lane)||lane==='main')throw new Error('Invalid owned agent lane');let manager=agentManagers.get(lane);if(!manager){manager=makeOwnedTabs(lane);agentManagers.set(lane,manager);}return manager;}
+async function retireAgentTabs(){for(const lane of Object.keys(config?.agents??{}) as BrowserLane[]){const frame=ownedBinding(lane);if(frame?.frameId!==undefined)await chrome.tabs.sendMessage(frame.tabId,{type:'disconnect'},{frameId:frame.frameId}).catch(()=>{});await ownedManager(lane).close(true);}agentManagers.clear();}
+function announceReady(){send({type:'ready',ready:config?.ready===true&&!busyLane,conversationControl:config?.conversationControl===true,conversationResumability:'active-chat-only',sessionSyncVersion:1,auxiliaryLanes:true,auxiliaryBootstrap:1,contextPackets:1,summaryRouting:1,agentContexts:1});}
 async function requirePacketFrame(tabId:number,frameId:number|undefined,lane:string){
  let state:any;try{state=await chrome.tabs.sendMessage(tabId,{type:'inspect'},{frameId});}catch{}
  if(state?.contextPackets!==1)throw Object.assign(new Error('Refresh the '+lane+' workbook to enable segmented context transfer'),{submitted:false});
 }
 async function frameMessage(value: any) {
-  const lane=value.lane??'main';
-  if(lane==='auxiliary'){
-    if(value.type==='cancel'){const frame=config?.auxiliary;if(frame?.frameId===undefined)return{cancelled:true};return await chrome.tabs.sendMessage(frame.tabId,value,{frameId:frame.frameId});}
-    const frame=await auxiliary.ensure();
+  const lane=value.lane??'main';if(!validBrowserLane(lane))throw new Error('Invalid browser lane');
+  if(lane!=='main'){
+    if(value.type==='cancel'){const frame=ownedBinding(lane);if(frame?.frameId===undefined)return{cancelled:true};return await chrome.tabs.sendMessage(frame.tabId,value,{frameId:frame.frameId});}
+    let frame:AuxiliaryBinding;try{frame=await ownedManager(lane).ensure();}catch(error){if(value.type==='job')throw Object.assign(error instanceof Error?error:new Error('Owned agent tab unavailable'),{submitted:false});throw error;}
     if(value.contextPackets)await requirePacketFrame(frame.tabId,frame.frameId,'auxiliary');
     if(value.summary){const state=await chrome.tabs.sendMessage(frame.tabId,{type:'inspect'},{frameId:frame.frameId});if(state?.summaryRouting!==1)throw Object.assign(new Error('Refresh the auxiliary workbook to enable summary model routing'),{submitted:false});}
-    if(value.type==='job'&&canceledJobs.has(value.id))throw new Error('Auxiliary request canceled before submission');
+    if(value.type==='job'&&canceledJobs.has(value.id))throw Object.assign(new Error('Auxiliary request canceled before submission'),{submitted:false});
     return await chrome.tabs.sendMessage(frame.tabId,value,{frameId:frame.frameId});
   }
   if (!config || config.frameId === undefined) throw new Error('Copilot frame not paired; reload selected workbook with Copilot open');
@@ -65,12 +71,12 @@ async function frameMessage(value: any) {
   if(value.contextPackets)await requirePacketFrame(config.tabId,config.frameId,'paired');
   return await chrome.tabs.sendMessage(config.tabId, value, { frameId: config.frameId });
 }
-async function retireCancelledLane(id:string,lane:'main'|'auxiliary',answer?:any){
+async function retireCancelledLane(id:string,lane:BrowserLane,answer?:any){
   if(busyLane?.id!==id)return;
   if(lane==='main'&&config){
     const ready=typeof answer?.ready==='boolean'?answer.ready:await frameMessage({type:'inspect'}).then(state=>state?.ready===true).catch(()=>false);
     config.ready=ready;await save();
-  }else if(lane==='auxiliary'&&config?.auxiliary&&typeof answer?.ready==='boolean'){config.auxiliary.ready=answer.ready;await save();}
+  }else if(lane!=='main'&&typeof answer?.ready==='boolean'){const frame=ownedBinding(lane);if(frame){frame.ready=answer.ready;await save();}}
   if(busyLane?.id!==id)return;
   settledJobs.delete(id);busyLane=undefined;announceReady();await uiStatus();
 }
@@ -117,7 +123,7 @@ async function connect() {
     const url = validUrl(config.url).replace('http:', 'ws:') + '/bridge/socket'; const ws = new WebSocket(url); socket = ws;
     ws.onopen = async () => {
       try { const checked = await frameMessage({ type: 'inspect' }); config!.ready = checked.ready === true;config!.conversationControl=checked.conversationControl===true&&checked.conversationResumability==='active-chat-only'; } catch { config!.ready = false;config!.conversationControl=false; }
-      send({ type: 'hello', token: config!.token, workerId: config!.workerId, ready: config!.ready,conversationControl:config!.conversationControl,conversationResumability:'active-chat-only',sessionSyncVersion:1,auxiliaryLanes:true,auxiliaryBootstrap:1,contextPackets:1,summaryRouting:1 }); await uiStatus();
+      send({ type: 'hello', token: config!.token, workerId: config!.workerId, ready: config!.ready,conversationControl:config!.conversationControl,conversationResumability:'active-chat-only',sessionSyncVersion:1,auxiliaryLanes:true,auxiliaryBootstrap:1,contextPackets:1,summaryRouting:1,agentContexts:1 }); await uiStatus();
     };
     ws.onmessage = event => { void (async () => {
       const value = JSON.parse(event.data);
@@ -150,25 +156,25 @@ chrome.permissions.onAdded.addListener(() => { void pairing.resume(); });
 // WebSocket traffic resets the MV3 idle timer in supported Chrome versions.
 setInterval(() => { send({ type: 'ping' }); void connect(); }, 20000);
 chrome.runtime.onStartup.addListener(() => { void pairing.resume(); void connect(); });
-chrome.tabs.onRemoved.addListener(tabId => { officeFrames.delete(tabId);if(config?.auxiliary?.tabId===tabId){config.auxiliary=undefined;if(busyLane?.lane==='auxiliary'){send({type:'failure',id:busyLane.id,error:'Bridge-owned auxiliary tab closed'});settledJobs.delete(busyLane.id);busyLane=undefined;announceReady();}void save();}if (config?.tabId === tabId) { config.ready = false; send({ type: 'ready', ready: false }); void save(); void uiStatus('Paired tab closed'); } });
+chrome.tabs.onRemoved.addListener(tabId => { const removedLane=laneForTab(tabId);officeFrames.delete(tabId);if(config&&removedLane?.startsWith('agent:')){delete config.agents?.[removedLane];agentManagers.delete(removedLane);if(busyLane?.lane===removedLane){send({type:'failure',id:busyLane.id,error:'Bridge-owned agent tab closed'});settledJobs.delete(busyLane.id);busyLane=undefined;announceReady();}void save();}if(config?.auxiliary?.tabId===tabId){config.auxiliary=undefined;if(busyLane?.lane==='auxiliary'){send({type:'failure',id:busyLane.id,error:'Bridge-owned auxiliary tab closed'});settledJobs.delete(busyLane.id);busyLane=undefined;announceReady();}void save();}if (config?.tabId === tabId) { config.ready = false; send({ type: 'ready', ready: false }); void save(); void uiStatus('Paired tab closed'); } });
 chrome.runtime.onMessage.addListener((message, sender, respond) => {
   void (async () => {
     if (sender.tab) {
       if(message.type==='office-host-ready'){
         let office=false;try{office=new URL(sender.url??'').hostname==='excel.officeapps.live.com';}catch{}
-        if(config&&office&&Number.isInteger(sender.frameId)&&typeof message.documentKey==='string'&&/^[a-f0-9]{64}$/.test(message.documentKey)&&(sender.tab.id===config.tabId||sender.tab.id===config.auxiliary?.tabId))officeFrames.set(sender.tab.id!,{frameId:sender.frameId!,documentKey:message.documentKey});
+        if(config&&office&&Number.isInteger(sender.frameId)&&typeof message.documentKey==='string'&&/^[a-f0-9]{64}$/.test(message.documentKey)&&laneForTab(sender.tab.id)!==undefined)officeFrames.set(sender.tab.id!,{frameId:sender.frameId!,documentKey:message.documentKey});
         respond({accepted:true});return;
       }
       if (!config || !safeFrame(sender.url)) return;
-      const lane=sender.tab.id===config.tabId?'main':sender.tab.id===config.auxiliary?.tabId?'auxiliary':undefined;if(!lane)return;
+      const lane=laneForTab(sender.tab.id);if(!lane)return;
       if (message.type === 'frame-ready') {
         if(lane==='main'){config.frameId = sender.frameId; config.ready = message.ready === true;if(sender.tab.url?.startsWith('https://excel.cloud.microsoft/open/'))config.workbookUrl=sender.tab.url;config.conversationControl=message.conversationControl===true&&message.conversationResumability==='active-chat-only';await save();}
-        else await auxiliary.observe(sender.tab.id!,sender.frameId,sender.url,message.ready===true);
+        else await ownedManager(lane).observe(sender.tab.id!,sender.frameId,sender.url,message.ready===true);
         if(busyLane?.lane===lane&&message.ready===true&&settledJobs.has(busyLane.id)){settledJobs.delete(busyLane.id);busyLane=undefined;}
         announceReady();await connect();await uiStatus();
       }
-      const frameId=lane==='main'?config.frameId:config.auxiliary?.frameId;
-      if (['result', 'failure'].includes(message.type) && sender.frameId === frameId) { pending.set(message.id, message);settledJobs.add(message.id); await connect(); send(message); }
+      const frameId=lane==='main'?config.frameId:ownedBinding(lane)?.frameId;
+      if (['result', 'failure'].includes(message.type) && sender.frameId === frameId && busyLane?.id===message.id && busyLane?.lane===lane) { pending.set(message.id, message);settledJobs.add(message.id); await connect(); send(message); }
       respond({ accepted: true }); return;
     }
     if (sender.id !== chrome.runtime.id) throw new Error('Only extension UI can pair');
@@ -180,7 +186,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
       const tab = await chrome.tabs.get(message.tabId);
       if (!tab.url?.startsWith('https://excel.cloud.microsoft/')) throw new Error('Select an Excel workbook tab first');
       await frameMessage({ type: 'disconnect' }).catch(() => {});
-      await auxiliary.close(true); // A retired auxiliary tab may contain a human draft.
+      await retireAgentTabs();await auxiliary.close(true); // A retired auxiliary tab may contain a human draft.
       config.tabId = message.tabId;config.workbookUrl=tab.url; config.frameId = undefined; config.ready = false; await save();
       send({ type: 'ready', ready: false });
       try { await chrome.scripting.executeScript({ target: { tabId: config.tabId, allFrames: true }, files: ['content.js'] }); }
@@ -195,7 +201,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     }
     if (message.type === 'unpair') {
       await frameMessage({ type: 'disconnect' }).catch(() => {});
-      await auxiliary.close();
+      await retireAgentTabs();await auxiliary.close();
       socket?.close(); socket = undefined; config = undefined; pending.clear();
       await chrome.scripting.unregisterContentScripts({ ids: ['copilot-frame','bridge-office-host'] });
       await chrome.storage.local.clear(); respond({ ok: true }); return;

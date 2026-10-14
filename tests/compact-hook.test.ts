@@ -16,3 +16,9 @@ test('direct launch registers session-only native compact hooks and budget setti
  assert.deepEqual(settings.modelOverrides,{'claude-opus-5-5':'copilot-opus-5.5','claude-sonnet-5-5':'copilot-sonnet-5.5'});
  assert.ok(!settings.hooks.PreCompact[0].hooks[0].command.includes('local-key'));
 });
+
+test('an agent compaction hook forwards only the native agent identity alongside session metadata',async()=>{
+ let packet:any;const send=(async(_url:any,options:any)=>{packet=JSON.parse(options.body);return new Response('{}');}) as typeof fetch;
+ await notifyCompact({hook_event_name:'PostCompact',trigger:'auto',session_id:'native-A',agent_id:'writer@team',cwd:'D:/fixture',compact_summary:'PRIVATE_SUMMARY'},{ANTHROPIC_BASE_URL:'http://127.0.0.1:59173',ANTHROPIC_AUTH_TOKEN:'local-key'},send);
+ assert.equal(packet.agent_id,'writer@team');assert.ok(!JSON.stringify(packet).includes('PRIVATE_SUMMARY'));
+});

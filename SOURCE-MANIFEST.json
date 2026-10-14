@@ -30,8 +30,8 @@
     },
     {
       "path": "CHANGELOG.md",
-      "bytes": 989,
-      "sha256": "01d4d3f2999c031e11ed6ff92705064071fcb781d7203675245d1b0454a6e85d"
+      "bytes": 1677,
+      "sha256": "99fbe6da2d419e133e30754612c63163649368118693d360ab404398b88cfc7f"
     },
     {
       "path": "CONTRIBUTING.md",
@@ -45,13 +45,13 @@
     },
     {
       "path": "README.en.md",
-      "bytes": 9183,
-      "sha256": "10e7acb5cc07be4e3ee4570b9ee2287692fc7ed9ca4bb69f5db0c5b38fb7a19c"
+      "bytes": 10280,
+      "sha256": "deb094aa476291f20784a52626268d27ebe562643c097722d51ae389f9d0e06a"
     },
     {
       "path": "README.md",
-      "bytes": 6323,
-      "sha256": "d4c5f0d5e1bb86e5e7c206fe056d2b10ec1889a65d6044e2c77ad793e5e05976"
+      "bytes": 7296,
+      "sha256": "b18b962a81145ae3b57a02cc8b7e188befdc76870bc4ba361da301bb56348fc1"
     },
     {
       "path": "README.zh-CN.md",
@@ -65,8 +65,8 @@
     },
     {
       "path": "docs/public/context.md",
-      "bytes": 3541,
-      "sha256": "ce1aa21622de9589282adcfc7bef3ad28ef298a84a6bddf4410997ddea53a90f"
+      "bytes": 4478,
+      "sha256": "7caa6e787d61eca93b81b2631a74fe70384b343f8fcd15c0c0f595f382ceca63"
     },
     {
       "path": "docs/public/desktop-advisor.md",
@@ -75,8 +75,8 @@
     },
     {
       "path": "docs/public/limitations.md",
-      "bytes": 2616,
-      "sha256": "1299dcd06baddca2e2e6995d8a3387eb5ee76ce007f69cc20185cc8890ac8f20"
+      "bytes": 3088,
+      "sha256": "7991b6731f36db596fb5227becc9950c24fa303c1dc17a0288eda5446d0a89c5"
     },
     {
       "path": "docs/public/release.md",
@@ -85,8 +85,8 @@
     },
     {
       "path": "docs/public/validation.md",
-      "bytes": 2628,
-      "sha256": "99dcfc98c1aa017d840c602c2c34c6f4ec9b2eeba005713812be7f2cf7059de6"
+      "bytes": 4880,
+      "sha256": "e21e7a97e7eed3cec3d7505a89fef7f4e9a25b7f9e18349bebb630cfcc1323cb"
     },
     {
       "path": "docs/public/wsl.md",
@@ -130,8 +130,8 @@
     },
     {
       "path": "packages/chrome-extension/adapter.ts",
-      "bytes": 18771,
-      "sha256": "82dd2e7038dd0f548d23db5b5624cdc7e347059a4c6decd03e06408578e75878"
+      "bytes": 21527,
+      "sha256": "16239d4b3171e607ff0fefbde5c9aacc8b81609156459447b8a27eb49ca21036"
     },
     {
       "path": "packages/chrome-extension/auxiliary-tabs.ts",
@@ -140,8 +140,8 @@
     },
     {
       "path": "packages/chrome-extension/background.ts",
-      "bytes": 18447,
-      "sha256": "eaeae1c0ad9e173d7519f25ee9e9f0c9562d9d373e8344d3c7dadcab106ca194"
+      "bytes": 20830,
+      "sha256": "571802f59d5bc9b66fdbe6fe31b202d7480bb8b9a6d646b2d4e55095de0d844c"
     },
     {
       "path": "packages/chrome-extension/content.ts",
@@ -180,13 +180,13 @@
     },
     {
       "path": "packages/cli/compact-hook.ts",
-      "bytes": 2071,
-      "sha256": "789bbc96b61c83582e9f543a5be0ddc4414c8085c8fa7634ba841047cf20860c"
+      "bytes": 2132,
+      "sha256": "cc260c33d9c259db235c8d31c3916a720836ae2492f05ad9bbfd15961a3a50db"
     },
     {
       "path": "packages/cli/index.ts",
-      "bytes": 17191,
-      "sha256": "a43b0f18c78b52cbb01b0ef36673eb33a1f8d5976aa024498c0746d99b3baf0a"
+      "bytes": 17342,
+      "sha256": "1ef39b200fafae2bb8437137a2f72e8b62fdb91fc48914c7456d6f740d67d50d"
     },
     {
       "path": "packages/cli/limits.ts",
@@ -220,18 +220,18 @@
     },
     {
       "path": "packages/gateway/conversations.ts",
-      "bytes": 5457,
-      "sha256": "52829a6432d982aa62fefc89b148bef371872180f46be3593abca2beeb1d3894"
+      "bytes": 5546,
+      "sha256": "e05a50195755399766889b49ee66cc924c6c983b6b03c5227f39a0a4ba02acea"
     },
     {
       "path": "packages/gateway/direct-sessions.ts",
-      "bytes": 7969,
-      "sha256": "8161b92766f3a772e2eefee651d0ea1a03cb4e7d7f88e817865c74b709dacb87"
+      "bytes": 8950,
+      "sha256": "21e25b980fcb44f8cdedaca6240e0432eaf638c55217d8dc59fa0d92d1aaa637"
     },
     {
       "path": "packages/gateway/index.ts",
-      "bytes": 29394,
-      "sha256": "3bf451b4367663786a65363df83851760b8ce8ec8ef19cf11a1bbb1b4fa96035"
+      "bytes": 32006,
+      "sha256": "7edff61c883decad6dc992b0aff932a5c1e1e9ab217574333e72ff2b22168f6e"
     },
     {
       "path": "packages/gateway/summary-prompt.ts",
@@ -245,8 +245,8 @@
     },
     {
       "path": "packages/protocol/conversation.ts",
-      "bytes": 402,
-      "sha256": "8c423524fd409fc7ef5e2f9f799926bb67cf3a8953f19a62fccdb1ee630ab6ff"
+      "bytes": 595,
+      "sha256": "d4833b014d7c23997e7522df3b037a7bd0d4896ec7a50d6837e43cd4380c9804"
     },
     {
       "path": "packages/protocol/index.ts",
@@ -290,8 +290,13 @@
     },
     {
       "path": "tests/adapter.test.ts",
-      "bytes": 14972,
-      "sha256": "1c1eee5973c7456286a89e7a238c0f159e80bfb0ed7027a0d03a2f64c44d23af"
+      "bytes": 23127,
+      "sha256": "62d39a8fc4be0ab7e3aa4976ed3b2809b2d97322cc7b0d53f54a4d63e9b1074e"
+    },
+    {
+      "path": "tests/agent-gateway.test.ts",
+      "bytes": 7310,
+      "sha256": "9b4b258ff7115b0d737627c1b7c905eea873cd784f16aaad076aa500d6cdb97b"
     },
     {
       "path": "tests/auxiliary-tabs.test.ts",
@@ -300,8 +305,8 @@
     },
     {
       "path": "tests/background-lanes.test.ts",
-      "bytes": 6882,
-      "sha256": "91e129c1768b2160418990e712c0390421515d5df69a5878b65b63a27dc3a69e"
+      "bytes": 9856,
+      "sha256": "a30444c4cc2819cc0a52b59b18997d94e174594d1f80b91b865b85fafb5c3407"
     },
     {
       "path": "tests/background-reply.test.ts",
@@ -315,13 +320,13 @@
     },
     {
       "path": "tests/cli.test.ts",
-      "bytes": 2017,
-      "sha256": "a77139c292d581ddee38a0bd33f51842d4db776afac0a2bf06a0ba5ad747fe22"
+      "bytes": 2281,
+      "sha256": "62feeb35e59a42587ce2efd3e7aae175f1c9525294edab078822f12b52f69a6c"
     },
     {
       "path": "tests/compact-hook.test.ts",
-      "bytes": 2132,
-      "sha256": "369446c72feded88e8cdca3e87a4254ba94458f08943b26e5e18870e2ec54846"
+      "bytes": 2742,
+      "sha256": "904b0126edd12a0324b1fc6a72e3d0c6776be1391cfa8787cd107fccc202d318"
     },
     {
       "path": "tests/context-transfer.test.ts",
@@ -350,8 +355,8 @@
     },
     {
       "path": "tests/direct-sessions.test.ts",
-      "bytes": 4607,
-      "sha256": "afcf14d8474137ec1fbbbd5738960b7c72f55722a14741defc44c9b19d38083e"
+      "bytes": 7928,
+      "sha256": "d729cd2c261865b5cf0b2bc8044e33b502ff8294c81a59c1f6806df49cfc6486"
     },
     {
       "path": "tests/evidence.test.ts",

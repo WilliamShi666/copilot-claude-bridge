@@ -12,6 +12,7 @@ function label(el: HTMLElement): string {
   return normalize(labelled || el.innerText || el.textContent || '');
 }
 export function button(doc: Document, name: RegExp): HTMLElement | undefined { return elements(doc, 'button,[role="button"],[role="menuitem"],[role="menuitemradio"],a').find(el => name.test(label(el))); }
+function enabled(el:HTMLElement|undefined):el is HTMLElement{return !!el&&!el.hasAttribute('disabled')&&el.getAttribute('aria-disabled')!=='true';}
 export function input(doc: Document): HTMLElement | undefined { return elements(doc, '[role="combobox"][contenteditable="true"],[role="textbox"][contenteditable="true"],textarea').find(el => /聊天输入|Chat input|Message Copilot|Ask Copilot/i.test(label(el)) || /聊天输入|Message Copilot/i.test(el.getAttribute('placeholder') ?? '')); }
 export function modelButton(doc: Document): HTMLElement | undefined { return button(doc, /^(所选模型:|Selected model:)/i); }
 export function modelSubmenu(doc: Document, provider: string): HTMLElement | undefined {
@@ -19,8 +20,8 @@ export function modelSubmenu(doc: Document, provider: string): HTMLElement | und
 }
 export function isChatOnly(doc: Document): boolean { return !!button(doc, /^(切换模式，当前: (聊天|仅聊天)，|Switch mode.*(?:Chat only|Chat)(?:,|$))/i); }
 export function replyText(doc: Document): string[] { return elements(doc, '.fai-CopilotMessage[role="article"]').map(el => normalize((el.querySelector('.fai-CopilotMessage__content') as HTMLElement | null)?.innerText ?? el.querySelector('.fai-CopilotMessage__content')?.textContent ?? el.innerText ?? el.textContent ?? '').replace(/^Copilot said:\s*/, '')); }
-export function inspect(doc: Document) { return { ready: !!input(doc) && !!modelButton(doc) && !button(doc, /^(停止生成|Stop generating)/i), model: modelButton(doc) ? label(modelButton(doc)!) : null, chatOnly: isChatOnly(doc),conversationControl:true,conversationResumability:'active-chat-only' }; }
-function until<T>(doc:Document,fn: () => T | undefined | false | Promise<T|undefined|false>, signal: AbortSignal, timeout = 15000): Promise<T> {
+export function inspect(doc: Document) { return { ready: enabled(input(doc)) && enabled(modelButton(doc)) && !button(doc, /^(停止生成|Stop generating)/i), model: modelButton(doc) ? label(modelButton(doc)!) : null, chatOnly: isChatOnly(doc),conversationControl:true,conversationResumability:'active-chat-only' }; }
+function until<T>(doc:Document,fn: () => T | undefined | false | Promise<T|undefined|false>, signal: AbortSignal, timeout = 15000,phase='control'): Promise<T> {
   signal.throwIfAborted();
   // Hidden Chrome tabs can defer chained timers for a minute. DOM mutations
   // provide progress directly; the timer is only a deadline, never a poll tick.
@@ -43,7 +44,7 @@ function until<T>(doc:Document,fn: () => T | undefined | false | Promise<T|undef
             // Revalidate if the DOM changed while an asynchronous hash ran.
             if(recheck)continue;
             if(value){finish(value);return;}
-            if(expired||Date.now()>=deadline){finish(undefined,new Error('Copilot UI control did not become ready'));return;}
+            if(expired||Date.now()>=deadline){finish(undefined,new Error('Copilot UI '+phase+' did not become ready '+JSON.stringify({input:!!input(doc),model:modelButton(doc)?label(modelButton(doc)!):null,modelEnabled:enabled(modelButton(doc)),chatOnly:isChatOnly(doc),userMessages:elements(doc,'.fai-UserMessage[role="article"]').length,assistantMessages:replyText(doc).length,draftChars:draftText(doc).length,sendEnabled:enabled(button(doc,/^(发送|Send)(?:\s|$)/i))})));return;}
           }while(recheck&&!ended);
         }catch(error){finish(undefined,error);}
         finally{checking=false;}
@@ -56,16 +57,20 @@ function until<T>(doc:Document,fn: () => T | undefined | false | Promise<T|undef
     check();
   });
 }
-function draftText(doc:Document) {
-  const editor=input(doc);if(!editor)return '';
-  if(editor instanceof doc.defaultView!.HTMLTextAreaElement)return normalize(editor.value);
-  const copy=editor.cloneNode(true) as HTMLElement;copy.querySelectorAll('[aria-hidden="true"]').forEach(n=>n.remove());return normalize(copy.textContent??'');
+function editorText(doc:Document):string {
+ const editor=input(doc);if(!editor)return '';
+ if(editor instanceof doc.defaultView!.HTMLTextAreaElement)return editor.value;
+ const copy=editor.cloneNode(true) as HTMLElement;copy.querySelectorAll('[aria-hidden="true"]').forEach(n=>n.remove());return copy.textContent??'';
 }
-export async function conversationCursor(doc:Document):Promise<string> {
+function draftText(doc:Document){return normalize(editorText(doc));}
+function conversationEvidence(doc:Document):string {
   const user=elements(doc,'.fai-UserMessage[role="article"]').at(-1),assistant=elements(doc,'.fai-CopilotMessage[role="article"]').at(-1);
   if(!user||!assistant)throw new Error('Conversation message evidence is unavailable');
   const text=(element:HTMLElement,selector:string)=>normalize(element.querySelector(selector)?.textContent??element.textContent??'').replace(/\s+/g,' ');
-  const bytes=new TextEncoder().encode(JSON.stringify([text(user,'.fai-UserMessage__message'),text(assistant,'.fai-CopilotMessage__content')]));
+  return JSON.stringify([text(user,'.fai-UserMessage__message'),text(assistant,'.fai-CopilotMessage__content')]);
+}
+export async function conversationCursor(doc:Document):Promise<string> {
+  const bytes=new TextEncoder().encode(conversationEvidence(doc));
   return [...new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))].map(x=>x.toString(16).padStart(2,'0')).join('');
 }
 async function matchesConversation(doc:Document,cursor:string) {
@@ -93,9 +98,9 @@ export async function captureConversation(doc:Document,job:BrowserJob,signal:Abo
 }
 async function clickMenuItem(doc: Document, text: string, signal: AbortSignal) {
   const escaped = text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const find = () => button(doc, new RegExp('^' + escaped + '$')) ?? elements(doc, '[role="menu"] span,[role="menu"] div').find(el => normalize(el.textContent ?? '') === text);
-  const el = await until(doc,find, signal);
-  (el.closest<HTMLElement>('button,[role="menuitem"],[role="menuitemradio"]') ?? el).click();
+  const find = () => {const match=button(doc,new RegExp('^'+escaped+'$'))??elements(doc,'[role="menu"] span,[role="menu"] div').find(el=>normalize(el.textContent??'')===text);const target=match?.closest<HTMLElement>('button,[role="menuitem"],[role="menuitemradio"]')??match;return enabled(target)?target:undefined;};
+  const el = await until(doc,find, signal,15000,'model option');
+  el.click();
 }
 export async function prepare(doc: Document, job: BrowserJob, signal: AbortSignal): Promise<void> {
   if (button(doc, /^(停止生成|Stop generating)/i)) throw new Error('Copilot is already generating; no new message was submitted');
@@ -105,25 +110,25 @@ export async function prepare(doc: Document, job: BrowserJob, signal: AbortSigna
   if(job.conversation?.mode==='continue')await restoreConversation(doc,job.conversation,signal);
   else {
   const newChat = button(doc, /^(新建聊天|New chat)$/i);
-  if (newChat) { newChat.click(); await until(doc,() => replyText(doc).length === 0 && elements(doc,'.fai-UserMessage[role="article"]').length === 0 && !!input(doc), signal); }
+  if (newChat) { const control=await until(doc,()=>{const current=button(doc,/^(新建聊天|New chat)$/i);return enabled(current)?current:undefined;},signal);control.click(); await until(doc,() => replyText(doc).length === 0 && elements(doc,'.fai-UserMessage[role="article"]').length === 0 && !!input(doc), signal,15000,'fresh chat history'); }
   else if (replyText(doc).length || elements(doc, '.fai-UserMessage[role="article"]').length) throw new Error('New chat control missing from an existing conversation; session isolation cannot be guaranteed');
   // The initial welcome screen has no New chat button and already contains no history.
   else if (normalize(input(doc)?.innerText ?? input(doc)?.textContent ?? '')) throw new Error('Copilot has an unsent user draft; message was not overwritten');
   }
   if(draftText(doc))throw new Error('The restored conversation has an unsent user draft; it was not overwritten');
-  let selected = await until(doc,() => modelButton(doc), signal);
+  let selected = await until(doc,() => {const current=modelButton(doc);return enabled(current)?current:undefined;}, signal,15000,'model selector');
   if (!label(selected).includes(job.modelLabel)) {
     if(selected.getAttribute('aria-expanded')!=='true')selected.click();
     const itemName = new RegExp('^' + job.modelLabel.replaceAll('.', '\\.') + '$');
-    const menu = await until(doc,() => button(doc, itemName) ?? modelSubmenu(doc,job.modelLabel.startsWith('GPT-')?'GPT':'Claude'), signal);
+    const menu = await until(doc,() => {const current=button(doc,itemName)??modelSubmenu(doc,job.modelLabel.startsWith('GPT-')?'GPT':'Claude');return enabled(current)?current:undefined;}, signal,15000,'model provider menu');
     if (menu.getAttribute('aria-haspopup') === 'menu' && menu.getAttribute('aria-expanded') !== 'true') menu.click();
     await clickMenuItem(doc, job.modelLabel, signal);
-    await until(doc,() => modelButton(doc) && label(modelButton(doc)!).includes(job.modelLabel), signal);
+    await until(doc,() => modelButton(doc) && label(modelButton(doc)!).includes(job.modelLabel), signal,15000,'selected model');
   }
   if (!isChatOnly(doc)) {
-    const mode = button(doc, /^(切换模式|Switch mode)/i); if (!mode) throw new Error('Copilot mode control missing'); mode.click();
-    const chat = await until(doc,() => button(doc, /^(仅聊天|Chat only)$/i), signal); chat.click();
-    await until(doc,() => isChatOnly(doc), signal);
+    const mode = await until(doc,()=>{const current=button(doc,/^(切换模式|Switch mode)/i);return enabled(current)?current:undefined;},signal);mode.click();
+    const chat = await until(doc,() => {const current=button(doc,/^(仅聊天|Chat only)$/i);return enabled(current)?current:undefined;}, signal,15000,'chat mode option'); chat.click();
+    await until(doc,() => isChatOnly(doc), signal,15000,'chat mode confirmation');
   }
 }
 export async function fill(doc: Document, prompt: string, signal: AbortSignal = new AbortController().signal): Promise<void> {
@@ -140,11 +145,7 @@ export async function fill(doc: Document, prompt: string, signal: AbortSignal = 
     // Native edit operation triggers Lexical's real input path; no remote page script injection.
     if (!doc.execCommand('insertText', false, wirePrompt)) throw new Error('Browser did not accept the chat input');
   }
-  const read = () => {
-    const current = input(doc); if (!current) return '';
-    if (current instanceof doc.defaultView!.HTMLTextAreaElement) return current.value;
-    const copy = current.cloneNode(true) as HTMLElement; copy.querySelectorAll('[aria-hidden="true"]').forEach(el => el.remove()); return copy.textContent ?? '';
-  };
+  const read = () => editorText(doc);
   try { await until(doc,() => read() === wirePrompt, signal, 3000); }
   catch (error) {
     if (signal.aborted) throw error;
@@ -197,12 +198,28 @@ async function exchangeAttempt(doc: Document, job: BrowserJob, signal: AbortSign
 }
 async function exchangeOne(doc:Document,job:BrowserJob,prompt:string,signal:AbortSignal,beforeSend:()=>Promise<void>,onPrompt:(prompt:string)=>void=()=>{}):Promise<string>{
   onPrompt(prompt);
-  await fill(doc,prompt,signal);
-  await editorCommit(doc,signal);
-  const send = await until(doc,() => { const el = button(doc, /^(发送|Send)(?:\s|$)/i); return el && !el.hasAttribute('disabled') && el.getAttribute('aria-disabled') !== 'true' ? el : undefined; }, signal);
-  if (!isChatOnly(doc) || !label(modelButton(doc)!).includes(job.modelLabel)) throw new Error('Mode or model changed before submission');
+  const wirePrompt=prompt.replace(/\r?\n/g,' ');
+  const users=()=>elements(doc,'.fai-UserMessage[role="article"]').length,assistants=()=>replyText(doc).length;
+  const baseUsers=users(),baseAssistants=assistants();const baseEvidence=baseUsers&&baseAssistants?conversationEvidence(doc):undefined;
+  const assertContext=()=>{if(users()!==baseUsers||assistants()!==baseAssistants||baseEvidence&&conversationEvidence(doc)!==baseEvidence)throw new Error('Copilot conversation changed before submission; nothing was sent');};
+  const assertMode=()=>{const model=modelButton(doc);if(!isChatOnly(doc)||!model||!label(model).includes(job.modelLabel))throw new Error('Mode or model changed before submission');};
+  let send:HTMLElement|undefined;
+  for(let attempt=0;attempt<3;attempt++){
+    signal.throwIfAborted();const existing=editorText(doc);if(existing!==''&&existing!==wirePrompt)throw new Error('Copilot input changed after preparation; the draft was not overwritten');
+    assertContext();assertMode();const latest=editorText(doc);if(latest!==''&&latest!==wirePrompt)throw new Error('Copilot input changed after preparation; the draft was not overwritten');await fill(doc,prompt,signal);await editorCommit(doc,signal);
+    const state=await until<{kind:'cleared'|'changed'|'ready';control?:HTMLElement}>(doc,()=>{
+      const current=editorText(doc);if(current!==wirePrompt)return{kind:current===''?'cleared':'changed'};
+      const control=button(doc,/^(发送|Send)(?:\s|$)/i);return enabled(control)?{kind:'ready',control}:undefined;
+    },signal,15000,'send button');
+    if(state.kind==='changed')throw new Error('Copilot input changed after preparation; the draft was not overwritten');
+    if(state.kind==='cleared')continue;send=state.control;break;
+  }
+  if(!send)throw new Error('Copilot repeatedly cleared its editor before submission; nothing was sent');
+  assertContext();assertMode();
   const previousReply=elements(doc,'.fai-CopilotMessage[role="article"]').at(-1),previousCount=replyText(doc).length;
-  await beforeSend(); signal.throwIfAborted(); send.click();
+  await beforeSend();signal.throwIfAborted();assertContext();assertMode();
+  if(editorText(doc)!==wirePrompt)throw new Error('Copilot input changed before the send click; no changed draft was submitted');
+  send=button(doc,/^(发送|Send)(?:\s|$)/i);if(!enabled(send))throw new Error('Copilot send control changed before the send click');send.click();
   const text=await until(doc,() => {
     if (button(doc, /^(停止生成|Stop generating)/i)) return undefined;
     const article = elements(doc, '.fai-CopilotMessage[role="article"]').at(-1);
@@ -212,7 +229,7 @@ async function exchangeOne(doc:Document,job:BrowserJob,prompt:string,signal:Abor
     const actions = [...article.querySelectorAll<HTMLElement>('[role="toolbar"] button')].some(el => /^(复制|Copy)$/i.test(label(el)));
     const text = replyText(doc).at(-1) ?? '';
     return actions && text ? text : undefined;
-  }, signal, 210000);
+  }, signal, 210000,'completed reply');
   const policy=providerRestriction(text);if(policy)throw new Error(policy);
   return text;
 }
