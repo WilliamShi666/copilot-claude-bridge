@@ -85,6 +85,6 @@ node dist/packages/cli/index.js context-reset --session <native-session-id>
 
 请求上下文和工具输出会发送到 Copilot，可能包含私有代码、路径和敏感信息。详见 [隐私与安全说明](SECURITY.md)。这是纯文本、等待网页完成后再返回的传输，无法提供真实服务端 token 计量、计费或完整 API 能力。
 
-查看 [实测范围](docs/public/validation.md)、[限制](docs/public/limitations.md) 与 [贡献指南](CONTRIBUTING.md)。本地测试通过不等于任意账号真实可用。
+查看 [实测范围](docs/public/validation.md)、[限制](docs/public/limitations.md) 、[贡献指南](CONTRIBUTING.md) 与 [变更记录](CHANGELOG.md)。本地测试通过不等于任意账号真实可用。
 
 使用 MIT 许可证，见 [LICENSE](LICENSE)。源码公开于 [GitHub](https://github.com/WilliamShi666/copilot-claude-bridge)，尚未发布 npm 包；内部兼容名称仍为 `m365-claude-bridge`。源码包仅导出明确允许公开的文件，不包含私人验收记录、浏览器配置、运行凭据或本机测试脚本。

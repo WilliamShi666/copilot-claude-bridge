@@ -128,7 +128,7 @@ npm.cmd test
 npm.cmd run export:source
 ```
 
-Tests use local mock servers and sanitized DOM fixtures; they do not establish live account compatibility. See [CONTRIBUTING.md](CONTRIBUTING.md). Public source exports deliberately omit local QA scripts, runtime credentials, screenshots and private acceptance transcripts. See [release preparation](docs/public/release.md).
+Tests use local mock servers and sanitized DOM fixtures; they do not establish live account compatibility. See [CONTRIBUTING.md](CONTRIBUTING.md) and [CHANGELOG.md](CHANGELOG.md). Public source exports deliberately omit local QA scripts, runtime credentials, screenshots and private acceptance transcripts. See [release preparation](docs/public/release.md).
 
 ## License
 
