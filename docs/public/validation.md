@@ -16,6 +16,12 @@ Stopping one named teammate from the native panel did not stop the other two, wh
 
 After the readiness and unsent-editor repairs, a fresh native Auto-mode session launched three named teammates in one assistant response. All three passed the native permission classifier and returned their separate markers without retries. The same three teammates then received three SendMessage follow-ups in one response; each recalled its original complete sentence and marker, used native Write and Read for its own file, and ran native Bash `pwd`. Independent file reads matched the actual Write arguments byte for byte; native tool results succeeded, each agent continued its original lane at epoch 1, and no gateway failures or native API errors occurred. No manual Yes approvals or saved permission-setting changes were used. This is limited acceptance of the tested in-process scenario, not certification of arbitrary Auto-mode tasks or split-pane teams.
 
+## Startup and saved gateway live acceptance
+
+After reloading the built extension, Windows Chrome was paired to the existing Ubuntu WSL gateway. Native Linux Claude Code 2.1.300 was launched interactively through the local startup entrypoint with Auto Mode. Write, Read and Bash `uname -s` all completed: independent disk reads matched the actual Write content byte for byte, the Bash result was Linux, native tool results succeeded and no native API errors occurred. The normal initial workspace trust prompt was accepted; no manual tool Yes approvals were used, and the saved native settings hash was unchanged.
+
+The real Chrome popup then switched from WSL to the previously paired Windows gateway and back to WSL with an empty pairing-code field. Both gateways became ready on their respective selected main workbook tabs; no new pairing code was supplied. The final WSL launcher readiness check passed. One extension still connects to only one gateway at a time; startup does not automatically select the destination in Chrome.
+
 ## Split-pane Agent Teams
 
 A separate Ubuntu WSL / tmux check launched one lead and three native teammate processes. All three initial teammate replies returned, but the lead received repeated context 409 errors. Separate-process requests omitted the agent identity used by the bridge and were routed as main conversations, changing the lead browser chat. This mode did not pass; the launcher defaults to in-process teammates.
