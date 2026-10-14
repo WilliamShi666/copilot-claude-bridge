@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Start Windows or WSL Claude Code through repository launchers that reuse a running gateway or start it in the background after it stops.
+- Add first-install, daily-start, restart recovery and Windows/WSL switching instructions in Chinese, with linked English instructions.
+- Preserve gateway address and pairing-code edits while the Chrome popup refreshes connection status.
+- Document the observed split-pane Agent Teams routing failure; use in-process teammates for the tested team flow.
 - Isolate native subagent and in-process teammate contexts by session, agent and model, each with its own Copilot workbook tab.
 - Queue browser inference with separate wait/generation deadlines and scope cancellation, compaction and recovery to the requesting agent.
 - Reuse ready Copilot panes, wait for enabled controls, and recover only an empty unsent editor while protecting changed drafts and conversations.

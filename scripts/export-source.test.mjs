@@ -25,6 +25,7 @@ test('source export excludes private development artifacts, validates hashes, an
   const result=await exportSource(out);assert.equal(result.scan,'passed');assert.equal(result.localMarkdownLinks,'passed');
   const names=await readdir(out);assert.ok(names.includes('LICENSE'));assert.ok(!names.includes('evidence'));assert.ok(!names.includes('tasks'));assert.ok(!names.includes('node_modules'));assert.ok(!names.includes('dist'));
   const manifest=JSON.parse(await readFile(join(out,'SOURCE-MANIFEST.json'),'utf8'));assert.equal(result.fileCount,manifest.files.length);
+  for(const path of ['start-copilot.cmd','start-copilot.sh','scripts/run-copilot.mjs','scripts/run-copilot.test.mjs'])assert.ok(manifest.files.some(file=>file.path===path));
   assert.ok(!manifest.files.some(f=>f.path.endsWith('.local.json')||f.path.startsWith('docs/debug-')||f.path==='scripts/setup-wsl-gateway.mjs'));
   for(const file of manifest.files){const bytes=await readFile(join(out,file.path));assert.equal(file.sha256,createHash('sha256').update(bytes).digest('hex'));}
   await assert.rejects(exportSource(out),/already exists/);

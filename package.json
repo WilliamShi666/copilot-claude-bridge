@@ -18,7 +18,8 @@
     "start": "node dist/packages/cli/index.js start",
     "doctor": "node dist/packages/cli/index.js doctor",
     "export:source": "node scripts/export-source.mjs",
-    "test:export": "node --test scripts/export-source.test.mjs"
+    "test:export": "node --test scripts/export-source.test.mjs",
+    "test:launcher": "node --test scripts/run-copilot.test.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",

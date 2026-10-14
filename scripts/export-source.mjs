@@ -7,6 +7,7 @@ import {fileURLToPath} from 'node:url';
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
 export const publicFiles=['package.json','package-lock.json','tsconfig.json','.gitignore','.gitattributes','README.md','README.en.md','README.zh-CN.md','LICENSE','CONTRIBUTING.md','SECURITY.md','CHANGELOG.md','scripts/build.mjs','scripts/build-desktop.mjs','scripts/ImportUia.cs','scripts/export-source.mjs','scripts/export-source.test.mjs'];
 export const publicDirectories=['packages','tests','docs/public','.github'];
+publicFiles.push('start-copilot.cmd','start-copilot.sh','scripts/run-copilot.mjs','scripts/run-copilot.test.mjs');
 const patterns=[
  ['private key',/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/],
  ['GitHub token',/\b(?:ghp_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{40,})\b/],

@@ -8,7 +8,9 @@ The extension requests `activeTab`, `scripting`, `storage`, `alarms` and loopbac
 
 Bridge state is in `~/.m365-claude-bridge` (or `M365_BRIDGE_STATE_DIR`). It includes local authentication credentials and context metadata. POSIX files use private permissions; Windows relies on the user profile's access controls. Gateway metadata does not persist source conversation bodies. The extension journals pending replies until acknowledged; interrupted replies may remain until disconnected. Claude Code itself maintains its normal local transcripts, which can contain the complete request and tool output. Killing a launcher can leave a private temporary session settings file; remove it after that client has exited.
 
-Disconnect in the extension to remove local pairing, pending replies and optional host grants. Stop the gateway with `node dist/packages/cli/index.js stop`. These actions do not delete native Claude Code transcripts or Microsoft chat history. Manage those separately in their respective applications.
+The extension remembers local gateway URLs, worker IDs and pairing tokens for Windows/WSL switching in Chrome local extension storage. This does not include Microsoft credentials. Only one gateway is connected at a time; finish pending requests before switching. Browser profile access can reveal these local tokens, so protect that profile as well as the gateway state directory.
+
+Disconnect in the extension to remove all saved gateway pairings, pending replies and optional host grants. Stop the gateway with `node dist/packages/cli/index.js stop`. These actions do not delete native Claude Code transcripts or Microsoft chat history. Manage those separately in their respective applications.
 
 ## Reporting vulnerabilities
 

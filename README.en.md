@@ -44,10 +44,10 @@ git clone https://github.com/WilliamShi666/copilot-claude-bridge.git
 cd copilot-claude-bridge
 npm.cmd ci --registry=https://registry.npmjs.org
 npm.cmd run build
-node dist/packages/cli/index.js start --max-prompt-chars 2000000
+.\start-copilot.cmd --gateway-only
 ```
 
-Keep that terminal open. In a second terminal, **from the same repository root**:
+The gateway stays in the background. **From the same repository root**:
 
 ```powershell
 node dist/packages/cli/index.js setup
@@ -61,9 +61,9 @@ node dist/packages/cli/index.js setup
 
 ```powershell
 node dist/packages/cli/index.js doctor
-node dist/packages/cli/index.js run --experimental-copilot-backend --model opus --cwd "C:\Projects\my-project"
+.\start-copilot.cmd "C:\Projects\my-project"
 # To use Sonnet instead:
-node dist/packages/cli/index.js run --experimental-copilot-backend --model sonnet --cwd "C:\Projects\my-project"
+.\start-copilot.cmd "C:\Projects\my-project" --model sonnet
 ```
 
 Replace the workspace with an existing directory. Start only one main Claude Code session per paired workbook. The initial request can be large because it includes the client's instructions, tool schemas and history. A long request may appear as several transfer messages in Copilot.
@@ -71,6 +71,8 @@ Replace the workspace with an existing directory. Start only one main Claude Cod
 For a first check, use a disposable directory and ask: **“Create hello.md containing hello, then read it back.”** Inspect both the native tool results and the file on disk. Keep Claude Code's permission prompts enabled.
 
 The terminal wrapper and extension retain their internal `m365-claude-bridge` name for compatibility. The source is not yet published to npm; use the local commands above.
+
+Daily/restart launch reuses or starts the gateway and waits for Chrome. CMD uses `start-copilot.cmd`; Git Bash uses `./start-copilot.cmd`. Defaults are in-process teammates and native Auto Mode; override with `--permission-mode default`. See [startup and environment switching](docs/public/startup.en.md).
 
 ## Ubuntu WSL + Windows Chrome
 
@@ -84,7 +86,7 @@ This configures the client's threshold. It does not establish Copilot's provider
 
 ## Recovery and stopping
 
-Native subagents and in-process teammates have separate context records keyed by session, agent and model. Each agent continues in its own bridge-owned workbook tab. Browser inference is serialized through one queue; local tools remain under Claude Code. Queue waiting and generation have separate deadlines, and canceling an unsent request does not cancel a sibling. Up to 16 agent tabs are retained; close completed tabs manually. Split-pane team processes require separate validation. After rebuilding/reloading the extension, `doctor` must show `capabilities.agentContexts: 1` for agent routing.
+Native subagents and in-process teammates have separate context records keyed by session, agent and model. Each agent continues in its own bridge-owned workbook tab. Browser inference is serialized through one queue; local tools remain under Claude Code. Queue waiting and generation have separate deadlines, and canceling an unsent request does not cancel a sibling. Up to 16 agent tabs are retained; close completed tabs manually. Split-pane team processes have an observed missing-agent-identity routing failure with lead-context 409 errors; use in-process teammates. After rebuilding/reloading the extension, `doctor` must show `capabilities.agentContexts: 1` for agent routing.
 
 Native Auto mode passed a limited live check: three named teammates started together and each continued with Write, Read and Bash without manual Yes approvals. See the [validation scope](docs/public/validation.md) for details and limitations.
 

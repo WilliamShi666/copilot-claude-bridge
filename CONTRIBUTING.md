@@ -7,6 +7,7 @@ npm ci --registry=https://registry.npmjs.org
 npm run typecheck
 npm test
 npm run test:export
+npm run test:launcher
 npm run export:source
 ```
 
