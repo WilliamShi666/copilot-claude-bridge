@@ -23,10 +23,10 @@ git clone https://github.com/WilliamShi666/copilot-claude-bridge.git
 cd copilot-claude-bridge
 npm.cmd ci --registry=https://registry.npmjs.org
 npm.cmd run build
-node dist/packages/cli/index.js start --max-prompt-chars 2000000
+.\start-copilot.cmd --gateway-only
 ```
 
-保留网关窗口，再从同一仓库目录打开另一个终端：
+网关会在后台运行。仍在同一仓库根目录执行：
 
 ```powershell
 node dist/packages/cli/index.js setup
@@ -40,12 +40,14 @@ node dist/packages/cli/index.js setup
 
 ```powershell
 node dist/packages/cli/index.js doctor
-node dist/packages/cli/index.js run --experimental-copilot-backend --model opus --cwd "C:\Projects\my-project"
+.\start-copilot.cmd "C:\Projects\my-project"
 # 使用 Sonnet：
-node dist/packages/cli/index.js run --experimental-copilot-backend --model sonnet --cwd "C:\Projects\my-project"
+.\start-copilot.cmd "C:\Projects\my-project" --model sonnet
 ```
 
 把工作目录换成真实存在的目录。首次验证建议使用空的临时目录，输入：**创建 hello.md，内容为 hello，然后读取确认。** 对照原生工具结果与磁盘文件，不要关闭权限检查。一个配对工作簿同时只启动一个主会话。
+
+日常启动和重启后都用这个入口：它会复用或自动启动网关，再等待 Chrome 就绪。CMD 使用 `start-copilot.cmd`，Git Bash 使用 `./start-copilot.cmd`。默认同进程队友与原生 Auto Mode，可用 `--permission-mode default` 改回普通权限提示。完整步骤见 [安装、启动、重启恢复与 Windows / WSL 切换说明](docs/public/startup.md)。
 
 当前适配器目标是 Opus 5.5 / Sonnet 5.5。压缩摘要使用 GPT-6.1 Sol，遇到可恢复的传输或 JSON 格式错误时回退 GPT-6 Sol；完整回退链需要账号同时有这两个模型。明确的服务拒绝与不安全的聊天状态不会通过换模型重试。
 
@@ -53,11 +55,13 @@ node dist/packages/cli/index.js run --experimental-copilot-backend --model sonne
 
 支持 Ubuntu WSL 中的原生 Linux Claude Code；Chrome 留在 Windows。需在 WSL 内单独安装 Node 与依赖，不要混用 Windows 的 `node_modules`。按 [WSL 安装说明](docs/public/wsl.md) 将扩展配对到 WSL 网关。
 
+WSL 仓库内使用 `bash ./start-copilot.sh /mnt/d/my-project`。Windows 默认端口 `59173`，WSL 默认 `59175`；启动目标网关不会自动切换扩展。首次分别配对后，扩展会记住各端配对；再次切换只需选择目标地址、保持码为空，再点 **Switch gateway and use selected tab**。操作前完成/取消旧请求并退出旧客户端，详见 [切换说明](docs/public/startup.md#切换-windows-与-wsl)。
+
 默认客户端压缩窗口为 `533k`，在已测试客户端上扣除预留后约为 500k 输入。可用 `--compact-window 200k` 调小。这是客户端配置，不代表已证明 Copilot 的服务端容量；显示的 token 数为本地估算。大上下文使用上述 200 万字符网关配置；普通默认仅 18 万字符。完整行为见 [上下文说明](docs/public/context.md)。
 
 普通轮次在同一个已校验的 Copilot 主聊天中增量传递。标题与摘要使用独立辅助聊天。首次请求包含系统指令、工具定义和历史，所以可能很长；分段传输还会产生多条 Copilot 消息。原生压缩完成后，主聊天会从 Claude Code 的摘要上下文重新开始。
 
-子代理与同进程 Agent Teams 按原生 session ID、agent ID 和模型区分上下文，每个 agent 使用独立的桥接器标签页并继续自己的聊天。浏览器端模型请求统一排队执行，本地工具仍由 Claude Code 管理。排队等待与生成分别计时；取消未发送的代理请求不会取消正在运行的兄弟代理。当前最多保留 16 个 agent 标签页，结束后可手动关闭；分屏 Agent Teams 仍需单独验证。更新扩展后，`doctor` 的 `capabilities.agentContexts` 应为 `1`。
+子代理与同进程 Agent Teams 按原生 session ID、agent ID 和模型区分上下文，每个 agent 使用独立的桥接器标签页并继续自己的聊天。浏览器端模型请求统一排队执行，本地工具仍由 Claude Code 管理。排队等待与生成分别计时；取消未发送的代理请求不会取消正在运行的兄弟代理。当前最多保留 16 个 agent 标签页，结束后可手动关闭；分屏 Agent Teams 已观察到子进程身份未转发导致主会话 409，当前建议使用 in-process。更新扩展后，`doctor` 的 `capabilities.agentContexts` 应为 `1`。
 
 原生 Auto Mode 已通过有限的真实验收：三位命名队友同时启动后，继续各自完成 Write、Read 和 Bash，无需手动点 Yes；详细范围和限制见[验收记录](docs/public/validation.md)。
 

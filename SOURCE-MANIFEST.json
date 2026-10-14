@@ -20,8 +20,8 @@
     },
     {
       "path": ".github/workflows/ci.yml",
-      "bytes": 660,
-      "sha256": "3ea3b2012d93cb47c885ae624600652290bf44de3310803d65cb1d6d810ec7d0"
+      "bytes": 695,
+      "sha256": "05d039bd1796eb473eac0de25a9f321efa13b0335dd315de4e12fa8e9ca7c907"
     },
     {
       "path": ".gitignore",
@@ -30,13 +30,13 @@
     },
     {
       "path": "CHANGELOG.md",
-      "bytes": 1677,
-      "sha256": "99fbe6da2d419e133e30754612c63163649368118693d360ab404398b88cfc7f"
+      "bytes": 2169,
+      "sha256": "21a9c627b0f4149701e0b35cad6808bb92aad922a2bc42216bcd9a3f7dbf3fa7"
     },
     {
       "path": "CONTRIBUTING.md",
-      "bytes": 1837,
-      "sha256": "5b7f2afae7655d4fdd680f4e567467bf3f1e08fb09ea1563096d2afa3795a4a0"
+      "bytes": 1859,
+      "sha256": "8027a5f62c47fd5c1d13a98e09dd41211bd62c4eb31966b5d60f5c8afe780fc6"
     },
     {
       "path": "LICENSE",
@@ -45,13 +45,13 @@
     },
     {
       "path": "README.en.md",
-      "bytes": 10280,
-      "sha256": "deb094aa476291f20784a52626268d27ebe562643c097722d51ae389f9d0e06a"
+      "bytes": 10511,
+      "sha256": "06f1b6a4efe63019579ce9d9b93673a2242b845acbb9cff49ac8defede51454e"
     },
     {
       "path": "README.md",
-      "bytes": 7296,
-      "sha256": "b18b962a81145ae3b57a02cc8b7e188befdc76870bc4ba361da301bb56348fc1"
+      "bytes": 8053,
+      "sha256": "4ce4e1d09013210c8d8cd0bff35b1cab2b0aa27fb5164d877b35e315dd240111"
     },
     {
       "path": "README.zh-CN.md",
@@ -60,8 +60,8 @@
     },
     {
       "path": "SECURITY.md",
-      "bytes": 2811,
-      "sha256": "44afb2e20aa8ab914e442a4f3c103ac49ef264668942b541a528a71063b3c082"
+      "bytes": 3206,
+      "sha256": "9494db6c65831fd16691a2378fd9f996f1e0ff894152f0e66127ba0b74b72717"
     },
     {
       "path": "docs/public/context.md",
@@ -75,8 +75,8 @@
     },
     {
       "path": "docs/public/limitations.md",
-      "bytes": 3088,
-      "sha256": "7991b6731f36db596fb5227becc9950c24fa303c1dc17a0288eda5446d0a89c5"
+      "bytes": 3219,
+      "sha256": "db03fd41ed4e92e81c7029437edebad666fe6f66d7b92458106c1497f5c76fb6"
     },
     {
       "path": "docs/public/release.md",
@@ -84,14 +84,24 @@
       "sha256": "88f78a9d9bb910e2b99dc346954dd49f233bae7b575ef16807e9c73e112a9b00"
     },
     {
+      "path": "docs/public/startup.en.md",
+      "bytes": 5805,
+      "sha256": "5915d3de0e04d4dbfa6ca81289e6dbfa7bb822e96d70375926ff30c706e71390"
+    },
+    {
+      "path": "docs/public/startup.md",
+      "bytes": 9307,
+      "sha256": "3d9db1f3f139d6768d5af0de7c090d64b09b44330ecbf690bfb61380161e2bdc"
+    },
+    {
       "path": "docs/public/validation.md",
-      "bytes": 4880,
-      "sha256": "e21e7a97e7eed3cec3d7505a89fef7f4e9a25b7f9e18349bebb630cfcc1323cb"
+      "bytes": 5743,
+      "sha256": "cc08732553233cbeb3ee625009b330110db6deb39941590e211e71a709b77fc2"
     },
     {
       "path": "docs/public/wsl.md",
-      "bytes": 3370,
-      "sha256": "d23a381b497ccd1906f17fded1f21b1fc9fdaedaa30b07a288a1810875e4b0a1"
+      "bytes": 3578,
+      "sha256": "b953d8f7bb62ddc319e0d12869dada83a46ecc7bd9aac1f35cc68775a9ba0cd7"
     },
     {
       "path": "package-lock.json",
@@ -100,8 +110,8 @@
     },
     {
       "path": "package.json",
-      "bytes": 1157,
-      "sha256": "2ff4bbdfd443afaa454fc2250f54486a3b1dce3793fc36dc3076e9f5cdaf010b"
+      "bytes": 1222,
+      "sha256": "5823b393abbcdbca73d246775cfbeb559d0cae7f7f5a30699bf72321a949a1ee"
     },
     {
       "path": "packages/advisor/evidence.ts",
@@ -140,8 +150,8 @@
     },
     {
       "path": "packages/chrome-extension/background.ts",
-      "bytes": 20830,
-      "sha256": "571802f59d5bc9b66fdbe6fe31b202d7480bb8b9a6d646b2d4e55095de0d844c"
+      "bytes": 22813,
+      "sha256": "1d145c0ee71a70df171c29c2dba7f0cc8fb6b8f0964a7379758f44f03084b392"
     },
     {
       "path": "packages/chrome-extension/content.ts",
@@ -170,13 +180,13 @@
     },
     {
       "path": "packages/chrome-extension/popup.html",
-      "bytes": 1103,
-      "sha256": "8a91321eaf7636d0bdcc7961661184ae7cae7dcbb799acb758936185ecf4dc74"
+      "bytes": 1363,
+      "sha256": "068bd69d30c6bcc64b398a532d0ed4c8ac8a754ad35cd6fc428e306a2f88e0dc"
     },
     {
       "path": "packages/chrome-extension/popup.ts",
-      "bytes": 3504,
-      "sha256": "cb0b94c7bed40da980ec89b082cf52c92fe8c334094e8bcb04ea8842ae02707f"
+      "bytes": 4518,
+      "sha256": "cd89c7f4ce9b3de1096a5ab78b91861099bbe4ea2ac52a5b614cc550e408fc8d"
     },
     {
       "path": "packages/cli/compact-hook.ts",
@@ -280,13 +290,33 @@
     },
     {
       "path": "scripts/export-source.mjs",
-      "bytes": 5204,
-      "sha256": "d46fc33c36f8e9ed6d39cba4d58145e9cb2a235a9ecccc539a66a027d4c5e9e3"
+      "bytes": 5319,
+      "sha256": "7749799c34330a537b744d6f6b5a2b12a849581ca9af3fae2082b32875548c4f"
     },
     {
       "path": "scripts/export-source.test.mjs",
-      "bytes": 2466,
-      "sha256": "85950eba74c7edd4eb70c14218a6314561c66c7167844c91e2b9c998f13dcb2e"
+      "bytes": 2640,
+      "sha256": "b0029fe7e12768319801beedaea1de2526798994a12cfcd22a46466e344b742d"
+    },
+    {
+      "path": "scripts/run-copilot.mjs",
+      "bytes": 7048,
+      "sha256": "7f88f1e9a1a28abd9d174790ba198299a51bc951b8f2190e0337f8f90b849860"
+    },
+    {
+      "path": "scripts/run-copilot.test.mjs",
+      "bytes": 4906,
+      "sha256": "4c34fb33409dd4be14e33ebc972b4138dc625913a1002e31fd0036a6db28b926"
+    },
+    {
+      "path": "start-copilot.cmd",
+      "bytes": 70,
+      "sha256": "9f24b98f3094003cf443e4660f513cb76159903db26962f4306348e2fcd7fc76"
+    },
+    {
+      "path": "start-copilot.sh",
+      "bytes": 158,
+      "sha256": "fab405ac653dd00775539ec2f438f0e86db161be802f979559f7c7b8b0a08592"
     },
     {
       "path": "tests/adapter.test.ts",
@@ -374,6 +404,11 @@
       "sha256": "9ee4d723f0f2185bf5bff730e79a6642e1f35e6811cf971207a04c423d0b9340"
     },
     {
+      "path": "tests/gateway-switch.test.ts",
+      "bytes": 4881,
+      "sha256": "cc4e8f5f43d0b9066b868c2f5a62a4c5cbdbd164788fdb55a6681cbf57b28df1"
+    },
+    {
       "path": "tests/gateway.test.ts",
       "bytes": 7769,
       "sha256": "b764b46a1a1df14b6b6aadd78f3939c15fd5f77d8c746c11fb9e46ea1d0724c6"
@@ -392,6 +427,11 @@
       "path": "tests/pairing.test.ts",
       "bytes": 9694,
       "sha256": "18988dacf728d3acbeb509bc205068c439ff72fd4f1357441ae75eac85bd5bd3"
+    },
+    {
+      "path": "tests/popup.test.ts",
+      "bytes": 3045,
+      "sha256": "208bc5296ebbaccd1e909a884f6574c80005256cf7a9c62ef907bfda149d7dee"
     },
     {
       "path": "tests/prompt-limits.test.ts",

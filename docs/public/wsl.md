@@ -13,10 +13,10 @@ git clone https://github.com/WilliamShi666/copilot-claude-bridge.git
 cd copilot-claude-bridge
 npm ci --registry=https://registry.npmjs.org
 npm run build
-node dist/packages/cli/index.js start --port 59175 --max-prompt-chars 2000000
+bash ./start-copilot.sh --gateway-only
 ```
 
-Keep the gateway terminal open. In a second **WSL** terminal from the same checkout:
+The gateway runs in the background. From the same **WSL** checkout:
 
 ```sh
 node dist/packages/cli/index.js setup
@@ -29,7 +29,7 @@ Pair the extension using `http://127.0.0.1:59175` and the code printed by the WS
 ```sh
 node dist/packages/cli/index.js doctor
 mkdir -p "$HOME/projects/copilot-demo"
-node dist/packages/cli/index.js run --experimental-copilot-backend --model opus --cwd "$HOME/projects/copilot-demo"
+bash ./start-copilot.sh "$HOME/projects/copilot-demo"
 ```
 
 Proceed only when `doctor` shows `workerConnected: true` and `browserReady: true`. Native tool permission prompts remain in effect. To check Linux execution, ask Claude Code to create/read a small file and run `uname -s` after approving that command.
@@ -39,3 +39,5 @@ If Chrome cannot connect, check that Windows can reach the loopback URL, WSL is 
 Do not share `node_modules` between Windows and WSL. Dependencies such as esbuild install a platform-specific binary. WSL state is in the Linux user's `~/.m365-claude-bridge`, separate from Windows state. The generic foreground instructions above do not install a system service or depend on a particular Linux username.
 
 After installing and pairing, you may run the local CLI from Windows with `wsl.exe -d Ubuntu --cd <checkout-path> -- node dist/packages/cli/index.js run --experimental-copilot-backend --cwd <linux-workspace>`. Replace paths with your own installation. Run `stop` inside the same WSL environment when finished.
+
+For daily startup, reboot recovery and switching an already paired Windows extension to WSL, see [startup and environment switching](startup.en.md) ([中文](startup.md)). Each environment must be paired once. Saved gateway switches use the popup with an empty code; simply starting WSL does not change the extension target.

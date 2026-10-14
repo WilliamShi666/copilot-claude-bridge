@@ -23,5 +23,6 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run test:export
+      - run: npm run test:launcher
       - run: npm audit --audit-level=high --registry=https://registry.npmjs.org
       - run: npm run export:source

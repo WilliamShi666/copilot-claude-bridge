@@ -2,8 +2,11 @@ import { OFFICE_ORIGINS, pairingCoordinator, type PairIntent } from './pairing.j
 import {validBrowserLane,type BrowserLane,type ConversationReceipt} from '../protocol/conversation.js';
 import {AuxiliaryTabs,type AuxiliaryBinding} from './auxiliary-tabs.js';
 interface Config { url: string; token: string; workerId: string; tabId: number;workbookUrl?:string; frameId?: number; ready?: boolean;conversationControl?:boolean;auxiliary?:AuxiliaryBinding;agents?:Record<string,AuxiliaryBinding> }
+type SavedPairing = Pick<Config,'url'|'token'|'workerId'>;
+let savedPairings:Record<string,SavedPairing>={};
 let socket: WebSocket | undefined, config: Config | undefined;
 let reconnecting = false;
+let switching=false;
 let busyLane:{id:string;lane:BrowserLane}|undefined;
 const canceledJobs=new Set<string>();
 const inFlightJobs=new Set<string>(),settledJobs=new Set<string>();
@@ -11,8 +14,16 @@ const pending = new Map<string, { type: string; id: string; text?: string; error
 const officeFrames=new Map<number,{frameId:number;documentKey:string}>();
 function validUrl(value: string) { const url = new URL(value); if (url.protocol !== 'http:' || url.hostname !== '127.0.0.1' || !url.port || url.pathname !== '/' || url.search || url.hash || url.username || url.password) throw new Error('Gateway must be http://127.0.0.1:<port>'); return url.origin; }
 const safeFrame = (url = '') => {try{return new URL(url).hostname === 'fa000000124.officeapps.live.com';}catch{return false;}};
-async function load() { config = (await chrome.storage.local.get('config')).config as Config | undefined; }
-async function save() { await chrome.storage.local.set({ config }); }
+async function load() { const data=await chrome.storage.local.get(['config','savedPairings']);config=data.config as Config|undefined;savedPairings=(data.savedPairings??{}) as Record<string,SavedPairing>; }
+async function save() {
+  if(config)savedPairings[config.url]={url:config.url,token:config.token,workerId:config.workerId};
+  await chrome.storage.local.set({config,savedPairings});
+}
+function assertSwitchIdle(){if(switching||busyLane||inFlightJobs.size||pending.size)throw new Error('Finish or cancel the current request before switching gateway/workbook');}
+async function changeConnection(action:()=>Promise<void>){
+  assertSwitchIdle();switching=true;send({type:'ready',ready:false});
+  try{await action();}finally{switching=false;await connect();announceReady();await uiStatus();}
+}
 async function uiStatus(error?: string) { await chrome.storage.local.set({ status: { connected: socket?.readyState === WebSocket.OPEN, ready: config?.ready === true&&!busyLane, tabId: config?.tabId, frameId: config?.frameId,sessionSyncVersion:1,auxiliaryTabId:config?.auxiliary?.tabId, error: error ?? null, updated: Date.now() } }); }
 function send(value: unknown) { if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(value)); }
 function ownedBinding(lane:BrowserLane){return lane==='auxiliary'?config?.auxiliary:config?.agents?.[lane];}
@@ -49,7 +60,7 @@ function makeOwnedTabs(lane:BrowserLane){return new AuxiliaryTabs({
 const auxiliary=makeOwnedTabs('auxiliary'),agentManagers=new Map<BrowserLane,AuxiliaryTabs>();
 function ownedManager(lane:BrowserLane){if(lane==='auxiliary')return auxiliary;if(!validBrowserLane(lane)||lane==='main')throw new Error('Invalid owned agent lane');let manager=agentManagers.get(lane);if(!manager){manager=makeOwnedTabs(lane);agentManagers.set(lane,manager);}return manager;}
 async function retireAgentTabs(){for(const lane of Object.keys(config?.agents??{}) as BrowserLane[]){const frame=ownedBinding(lane);if(frame?.frameId!==undefined)await chrome.tabs.sendMessage(frame.tabId,{type:'disconnect'},{frameId:frame.frameId}).catch(()=>{});await ownedManager(lane).close(true);}agentManagers.clear();}
-function announceReady(){send({type:'ready',ready:config?.ready===true&&!busyLane,conversationControl:config?.conversationControl===true,conversationResumability:'active-chat-only',sessionSyncVersion:1,auxiliaryLanes:true,auxiliaryBootstrap:1,contextPackets:1,summaryRouting:1,agentContexts:1});}
+function announceReady(){send({type:'ready',ready:config?.ready===true&&!busyLane&&!switching,conversationControl:config?.conversationControl===true,conversationResumability:'active-chat-only',sessionSyncVersion:1,auxiliaryLanes:true,auxiliaryBootstrap:1,contextPackets:1,summaryRouting:1,agentContexts:1});}
 async function requirePacketFrame(tabId:number,frameId:number|undefined,lane:string){
  let state:any;try{state=await chrome.tabs.sendMessage(tabId,{type:'inspect'},{frameId});}catch{}
  if(state?.contextPackets!==1)throw Object.assign(new Error('Refresh the '+lane+' workbook to enable segmented context transfer'),{submitted:false});
@@ -91,10 +102,12 @@ async function restoreAdapter() {
   await chrome.scripting.executeScript({ target: { tabId: config.tabId, allFrames: true }, files: ['content.js'] }).catch(() => {});
 }
 async function commitPair(intent: PairIntent) {
+  await changeConnection(async()=>{
   const response = await fetch(intent.url + '/bridge/pair', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: intent.code }), signal: AbortSignal.timeout(10000) });
   if (!response.ok) { const detail = await response.json().catch(() => null); throw new Error(detail?.error?.message ?? 'Pair code rejected; restart gateway for a fresh code'); }
   const { token } = await response.json();
   if (typeof token !== 'string' || !/^[a-f0-9]{64}$/.test(token)) throw new Error('Invalid gateway pairing response');
+  await save();await frameMessage({type:'disconnect'}).catch(()=>{});await retireAgentTabs();await auxiliary.close(true);
   socket?.close(); socket = undefined;
   const selected=await chrome.tabs.get(intent.tabId);
   config = { url: intent.url, token, workerId: crypto.randomUUID(), tabId: intent.tabId,workbookUrl:selected.url, ready: false }; await save();
@@ -103,6 +116,7 @@ async function commitPair(intent: PairIntent) {
   try { await chrome.scripting.executeScript({ target: { tabId: config.tabId, allFrames: true }, files: ['content.js'] }); }
   catch { await uiStatus('Paired. Reload selected workbook and reopen Copilot to activate its frame.'); }
   await connect();
+  });
 }
 const pairing = pairingCoordinator({
   read: async () => (await chrome.storage.local.get('pairIntent')).pairIntent as PairIntent | undefined,
@@ -115,18 +129,23 @@ const pairing = pairingCoordinator({
   now: Date.now,
 });
 async function connect() {
-  if (reconnecting || socket?.readyState === WebSocket.OPEN || socket?.readyState === WebSocket.CONNECTING) return;
+  if (switching || reconnecting || socket?.readyState === WebSocket.OPEN || socket?.readyState === WebSocket.CONNECTING) return;
   reconnecting = true;
   try {
     await load(); if (!config) return;
     await restoreAdapter();
     const url = validUrl(config.url).replace('http:', 'ws:') + '/bridge/socket'; const ws = new WebSocket(url); socket = ws;
     ws.onopen = async () => {
-      try { const checked = await frameMessage({ type: 'inspect' }); config!.ready = checked.ready === true;config!.conversationControl=checked.conversationControl===true&&checked.conversationResumability==='active-chat-only'; } catch { config!.ready = false;config!.conversationControl=false; }
+      if(socket!==ws)return;
+      const captured=config!;
+      try { const checked = await frameMessage({ type: 'inspect' });if(socket!==ws||config!==captured)return;captured.ready = checked.ready === true;captured.conversationControl=checked.conversationControl===true&&checked.conversationResumability==='active-chat-only'; } catch {if(socket!==ws||config!==captured)return;captured.ready = false;captured.conversationControl=false; }
+      if(socket!==ws)return;
       send({ type: 'hello', token: config!.token, workerId: config!.workerId, ready: config!.ready,conversationControl:config!.conversationControl,conversationResumability:'active-chat-only',sessionSyncVersion:1,auxiliaryLanes:true,auxiliaryBootstrap:1,contextPackets:1,summaryRouting:1,agentContexts:1 }); await uiStatus();
     };
     ws.onmessage = event => { void (async () => {
+      if(socket!==ws)return;
       const value = JSON.parse(event.data);
+      if(switching&&['job','recover'].includes(value.type)){send({type:'failure',id:value.id,error:'Gateway/workbook switch in progress',...(value.type==='job'?{submitted:false}:{})});return;}
       if (value.type === 'connected') {
         if(value.activeId===null&&busyLane){const orphan=busyLane;canceledJobs.add(orphan.id);const answer=await frameMessage({type:'cancel',id:orphan.id,lane:orphan.lane}).catch(()=>undefined);await retireCancelledLane(orphan.id,orphan.lane,answer);}
         for (const reply of pending.values()) send(reply); return;
@@ -145,8 +164,8 @@ async function connect() {
         finally{if(value.type==='job'){inFlightJobs.delete(value.id);canceledJobs.delete(value.id);}}
       }
     })().catch(err => uiStatus(String(err.message))); };
-    ws.onclose = () => { if (socket === ws) socket = undefined; void uiStatus('Gateway disconnected; reconnecting without resubmitting uncertain jobs'); };
-    ws.onerror = () => { void uiStatus('Cannot connect to localhost gateway'); };
+    ws.onclose = () => { if (socket !== ws)return;socket = undefined; void uiStatus('Gateway disconnected; reconnecting without resubmitting uncertain jobs'); };
+    ws.onerror = () => { if(socket===ws)void uiStatus('Cannot connect to localhost gateway'); };
   } catch (error) { await uiStatus(error instanceof Error ? error.message : 'Connection failed'); }
   finally { reconnecting = false; }
 }
@@ -179,19 +198,24 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     }
     if (sender.id !== chrome.runtime.id) throw new Error('Only extension UI can pair');
     if (message.type === 'rebind-tab') {
+      await changeConnection(async()=>{
       await load();
       if (!config) throw new Error('Pair the local gateway first');
+      const target=validUrl(message.url??config.url),different=target!==config.url;
+      const stored=different?savedPairings[target]:undefined;
+      if(different&&(!stored||stored.url!==target||!/^[a-f0-9]{64}$/.test(stored.token)||typeof stored.workerId!=='string'||!stored.workerId))throw new Error('This gateway has no saved pairing. Run setup in that environment and pair once.');
       if (!Number.isInteger(message.tabId)) throw new Error('Invalid selected tab');
       if (!(await chrome.permissions.contains({ origins: OFFICE_ORIGINS }))) throw new Error('Office frame permission is missing; pair again to grant access');
       const tab = await chrome.tabs.get(message.tabId);
       if (!tab.url?.startsWith('https://excel.cloud.microsoft/')) throw new Error('Select an Excel workbook tab first');
       await frameMessage({ type: 'disconnect' }).catch(() => {});
       await retireAgentTabs();await auxiliary.close(true); // A retired auxiliary tab may contain a human draft.
+      if(different){await save();send({type:'ready',ready:false});socket?.close();socket=undefined;config={...stored!,tabId:message.tabId,ready:false};}
       config.tabId = message.tabId;config.workbookUrl=tab.url; config.frameId = undefined; config.ready = false; await save();
       send({ type: 'ready', ready: false });
       try { await chrome.scripting.executeScript({ target: { tabId: config.tabId, allFrames: true }, files: ['content.js'] }); }
       catch { await uiStatus('Refresh the selected workbook and reopen Copilot to activate its frame.'); }
-      await connect(); respond({ ok: true }); return;
+      });respond({ ok: true }); return;
     }
     if (message.type === 'prepare-pair') { respond(await pairing.prepare(message)); return; }
     if (message.type === 'permission-decision') {
@@ -200,11 +224,13 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
       respond({ ok: true }); return;
     }
     if (message.type === 'unpair') {
+      await changeConnection(async()=>{
       await frameMessage({ type: 'disconnect' }).catch(() => {});
       await retireAgentTabs();await auxiliary.close();
       socket?.close(); socket = undefined; config = undefined; pending.clear();
       await chrome.scripting.unregisterContentScripts({ ids: ['copilot-frame','bridge-office-host'] });
-      await chrome.storage.local.clear(); respond({ ok: true }); return;
+      savedPairings={};await chrome.storage.local.clear();
+      });respond({ ok: true }); return;
     }
     respond({ error: 'Unknown extension request' });
   })().catch(error => respond({ error: error instanceof Error ? error.message : 'Extension failure' }));
