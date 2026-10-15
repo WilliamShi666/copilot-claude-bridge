@@ -136,7 +136,10 @@ node dist/packages/cli/index.js stop
 | `.ps1 cannot be loaded` | PowerShell 使用 `.\start-copilot.cmd`、`npm.cmd`、`claude.cmd`，无需修改全局执行策略。 |
 | `Gateway authentication/status failed` | 保留凭据，运行 `doctor` 并检查该端口是否被其他服务占用；启动入口不会覆盖错误或另开网关。 |
 | `Finish or cancel the current request` | 先完成或取消原生请求，等网关空闲再切换，不要强行断开处理中的会话。 |
-| `409 Native context delivery is uncertain` | 检查是否已经有工具副作用，再按错误中给出的 session/agent 执行 `context-reset`；见 [主页恢复说明](../../README.md#常见问题)。 |
+| `cancelContinuation` 不为 `1` / matching extension | 网关和扩展成套更新后，重载扩展、刷新配对工作簿，再运行 `doctor`。原有启动命令不变。 |
+| 中断后等待取消确认 | 新反馈最多等待约 15 秒；可核实原聊天就增量续接，否则每次反馈最多在新标签页完整重建一次并提示。 |
+| `Copilot refused ...` | 上游明确拒绝，不自动换模型、换聊天或重试。只改输出长度的重试仍显示原始错误；`context-reset` 不能解决服务拒绝。 |
+| `409 Native context delivery is uncertain` | 旧记录或缺乏可信中断证据时保留保护。检查工具副作用，再按错误中的 session/agent 显式恢复；见 [主页恢复说明](../../README.md#常见问题)。 |
 
 诊断命令：`node dist/packages/cli/index.js doctor`。后台启动日志位于对应环境的 `~/.m365-claude-bridge/gateway.stdout.log` 和 `gateway.stderr.log`；不要公开上传完整凭据、上下文和私人日志。通过 systemd 启动的既有 WSL 网关查看对应服务日志，而不是新入口的日志文件。
 

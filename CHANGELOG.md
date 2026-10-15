@@ -2,7 +2,10 @@
 
 ## Unreleased
 
-- Continue after an interrupted native request when the user explicitly appends feedback, rebasing current native context in a fresh Copilot chat while keeping ambiguous retries blocked.
+- Forward base64 images from native Read/user messages as verified Copilot attachments, preserving stable image references and allowing subsequent feedback to continue without repeating image uploads.
+- Confirm native cancellation and continue verified original chats with recovery deltas; discard cancelled tool calls and preserve actual native tool results.
+- Rebuild an unavailable chat at most once per feedback in an isolated tab, preserving drafts and reporting full synchronization.
+- Preserve terminal upstream refusals across retries/restarts, including late replies tied to the original input; negotiate matching cancellation-capable gateway/extension versions.
 - Start Windows or WSL Claude Code through repository launchers that reuse a running gateway or start it in the background after it stops.
 - Add first-install, daily-start, restart recovery and Windows/WSL switching instructions in Chinese, with linked English instructions.
 - Preserve gateway address and pairing-code edits while the Chrome popup refreshes connection status.
