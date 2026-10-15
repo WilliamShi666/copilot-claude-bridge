@@ -79,7 +79,7 @@ export async function startGateway(options: Options) {
     if(error){let diagnostic=error.message;for(const secret of [clientKey,workerToken,pairCode])if(secret)diagnostic=diagnostic.replaceAll(secret,'[local credential]');job.error=diagnostic.slice(0,2000);}
     const uncertain=!!job.workerDispatched&&job.submitted!==false;
     if(dispatched&&!job.workerDispatched&&job.dispatchWorker===worker&&job.readinessRevision===readinessRevision&&worker?.readyState===WebSocket.OPEN&&!closing)ready=true;
-    if(error&&job.directFrame)void direct.fail(job.directFrame,uncertain).catch(()=>{lastError='Native context persistence failed';});
+    if(error&&job.directFrame)void direct.fail(job.directFrame,uncertain,error.name==='AbortError').catch(()=>{lastError='Native context persistence failed';});
     if (error) { lastError = error.message; if(job.conversation)void (uncertain?conversations.fail(job.conversation.id,job.id):conversations.cancelBeforeDispatch(job.conversation.id,job.id)).catch(()=>{lastError='Conversation metadata persistence failed';});if(job.lane==='auxiliary'&&validSession(job.session)&&direct.compacting(job.session,job.agentId))void direct.abortCompact(job.session,job.agentId).catch(()=>{});job.reject(error); } else { lastError = null; completed++; job.resolve(text!); }
     if (active?.id === job.id) active = undefined;
     // Do not retain source text/history in completed job objects or persisted metadata.

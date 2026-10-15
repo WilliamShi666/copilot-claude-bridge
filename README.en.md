@@ -94,6 +94,8 @@ Keep Chrome, the paired workbook and Copilot open. Do not manually switch that c
 
 If the client reports **409 Native context delivery is uncertain**, first let the request finish or cancel it; then use the native session ID shown in the error:
 
+Feedback after a completed task continues the existing chat. After a client interrupts a dispatched request, explicitly appended user feedback can bootstrap the complete latest native history in a fresh Copilot chat. The canceled request is never replayed. Identical retries, tool-only changes, rewritten history and other unknown delivery still require explicit recovery. Errors left by older gateway versions need a one-time reset below.
+
 ```powershell
 node dist/packages/cli/index.js context-reset --session <native-session-id>
 ```

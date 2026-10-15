@@ -16,6 +16,14 @@ Stopping one named teammate from the native panel did not stop the other two, wh
 
 After the readiness and unsent-editor repairs, a fresh native Auto-mode session launched three named teammates in one assistant response. All three passed the native permission classifier and returned their separate markers without retries. The same three teammates then received three SendMessage follow-ups in one response; each recalled its original complete sentence and marker, used native Write and Read for its own file, and ran native Bash `pwd`. Independent file reads matched the actual Write arguments byte for byte; native tool results succeeded, each agent continued its original lane at epoch 1, and no gateway failures or native API errors occurred. No manual Yes approvals or saved permission-setting changes were used. This is limited acceptance of the tested in-process scenario, not certification of arbitrary Auto-mode tasks or split-pane teams.
 
+## Interruption and follow-up feedback
+
+The feedback repair passes 139 runtime checks, including dispatched cancellation, identical retry rejection, merged tool-result feedback, trailing native system messages, and recovery attempts that fail before submission. Launcher/export checks remain separate. These checks passed with Windows Node 24 and Ubuntu WSL Node 22.
+
+In native Ubuntu WSL Claude Code 2.1.300 Auto Mode, an AskUserQuestion answer started a main request. Its actual dispatch was observed before sending native Escape to interrupt it. The ledger recorded exactly one canceled job. Explicit new user feedback then completed a full `client-interrupted-feedback` bootstrap in a new Copilot chat, followed by native Write/Read with independently verified file contents. After that task finished, another feedback turn changed and read the file again using ordinary delta continuation. The final repaired sequence had no native uncertain-context API errors. The earlier live run exposed trailing system environment messages and failed before that handling was added; it is not counted as a successful recovery.
+
+The client's current history remains authoritative. The bridge does not automatically resend the abandoned job or execute tools itself. Rewritten history, tool-only changes and unknown delivery retain explicit recovery requirements described in [context.md](context.md).
+
 ## Startup and saved gateway live acceptance
 
 After reloading the built extension, Windows Chrome was paired to the existing Ubuntu WSL gateway. Native Linux Claude Code 2.1.300 was launched interactively through the local startup entrypoint with Auto Mode. Write, Read and Bash `uname -s` all completed: independent disk reads matched the actual Write content byte for byte, the Bash result was Linux, native tool results succeeded and no native API errors occurred. The normal initial workspace trust prompt was accepted; no manual tool Yes approvals were used, and the saved native settings hash was unchanged.

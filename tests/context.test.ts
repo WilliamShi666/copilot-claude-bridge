@@ -1,7 +1,26 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {planContext,estimateTokens,renderContextPrompt} from '../packages/protocol/context.js';
+import {planContext,estimateTokens,renderContextPrompt,feedbackCheckpoint,appendedUserFeedback} from '../packages/protocol/context.js';
 const initial={model:'copilot-opus-5.5',max_tokens:1024,system:[{type:'text',text:'Native system rules'}],tools:[{name:'Read',input_schema:{type:'object'}}],messages:[{role:'user',content:'Read a file'}]};
+
+test('interruption recovery requires appended feedback, rejecting reminder churn, removed history and assistant-only changes',()=>{
+ const input={...initial,messages:[{role:'user',content:[{type:'tool_result',tool_use_id:'q',content:'Answer'},{type:'text',text:'Prior feedback',cache_control:{type:'ephemeral'}}]}]};
+ const checkpoint=feedbackCheckpoint(input,planContext(input).snapshot);
+ const good={...input,messages:[{role:'user',content:[{type:'tool_result',tool_use_id:'q',content:'Answer'},{type:'text',text:'Prior feedback'},{type:'text',text:'New human feedback'}]}]};
+ assert.equal(appendedUserFeedback(good,checkpoint),true);
+ for(const blocks of [[{type:'text',text:'Rewritten history'}],[...input.messages[0].content,{type:'text',text:'<system-reminder>Changed runtime detail</system-reminder>'}],[...input.messages[0].content,{type:'text',text:'[Request interrupted by user]'}]])assert.equal(appendedUserFeedback({...input,messages:[{role:'user',content:blocks}]},checkpoint),false);
+ assert.equal(appendedUserFeedback({...input,messages:[...input.messages,{role:'assistant',content:'Late reply'}]},checkpoint),false);
+});
+
+test('native trailing system environment messages do not hide appended or merged user feedback',()=>{
+ const input={...initial,messages:[{role:'user',content:[{type:'tool_result',tool_use_id:'q',content:'C'}]},{role:'system',content:'Native runtime environment'}]};
+ const checkpoint=feedbackCheckpoint(input,planContext(input).snapshot);
+ const tail={role:'system',content:'Updated runtime environment'};
+ assert.equal(appendedUserFeedback({...input,messages:[input.messages[0],tail]},checkpoint),false);
+ assert.equal(appendedUserFeedback({...input,messages:[input.messages[0],{role:'user',content:'New feedback'},tail]},checkpoint),true);
+ assert.equal(appendedUserFeedback({...input,messages:[{role:'user',content:[...input.messages[0].content as any[],{type:'text',text:'[Request interrupted by user]'},{type:'text',text:'Instead choose D'}]},tail]},checkpoint),true);
+ assert.equal(appendedUserFeedback({...input,messages:[input.messages[0],{role:'assistant',content:'Possible prefill'},tail]},checkpoint),false);
+});
 test('bootstrap preserves the full current request; later rounds contain only appended native messages',()=>{
  const first=planContext(initial);assert.equal(first.kind,'bootstrap');assert.deepEqual(first.messages,initial.messages);
  const appended=[{role:'assistant',content:[{type:'tool_use',id:'tool-1',name:'Read',input:{file_path:'file.txt'}}]},{role:'user',content:[{type:'tool_result',tool_use_id:'tool-1',content:'REAL_FILE_CONTENT'}]}];

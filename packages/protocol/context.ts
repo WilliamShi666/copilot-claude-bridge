@@ -2,6 +2,21 @@ import type {MessagesRequest,ObjectValue} from './index.js';
 import {createHash} from 'node:crypto';
 import {BridgeError,buildPrompt,REPLY_CONTRACT} from './index.js';
 export interface ContextSnapshot { messageHashes:string[]; controlHashes:Record<string,string>; estimatedTokens:number }
+export interface FeedbackCheckpoint {snapshot:ContextSnapshot;tailUserBlockHashes?:string[]}
+const messageBlocks=(message:any):any[]=>typeof message?.content==='string'?[{type:'text',text:message.content}]:Array.isArray(message?.content)?message.content:[];
+function feedbackEnd(request:MessagesRequest):number|undefined {let index=request.messages.length-1;while(index>=0&&request.messages[index].role==='system')index--;return request.messages[index]?.role==='user'?index+1:undefined;}
+export function feedbackCheckpoint(request:MessagesRequest,snapshot:ContextSnapshot):FeedbackCheckpoint {
+ const end=feedbackEnd(request);return end===undefined?{snapshot}:{snapshot:{...snapshot,messageHashes:snapshot.messageHashes.slice(0,end)},tailUserBlockHashes:messageBlocks(request.messages[end-1]).map(fingerprint)};
+}
+export function appendedUserFeedback(request:MessagesRequest,previous:FeedbackCheckpoint):boolean {
+ const end=feedbackEnd(request);if(end===undefined)return false;
+ const hashes=planContext(request).snapshot.messageHashes.slice(0,end),old=previous.snapshot.messageHashes,last=request.messages[end-1];
+ if(last?.role!=='user'||!old.length)return false;
+ const blocks=messageBlocks(last),newText=(b:any)=>b?.type==='text'&&typeof b.text==='string'&&b.text.trim()&&!/^\s*(?:<system-reminder>|\[Request interrupted by user)/i.test(b.text);
+ if(hashes.length>old.length&&old.every((h,i)=>hashes[i]===h))return blocks.some(newText);
+ const tail=previous.tailUserBlockHashes;
+ return !!tail&&hashes.length===old.length&&old.slice(0,-1).every((h,i)=>hashes[i]===h)&&blocks.length>tail.length&&tail.every((h,i)=>fingerprint(blocks[i])===h)&&blocks.slice(tail.length).some(newText);
+}
 export interface ContextPlan { kind:'bootstrap'|'delta'; reason:string; messages:ObjectValue[]; updates:ObjectValue; removedFields:string[]; snapshot:ContextSnapshot }
 export function planContext(request:MessagesRequest,previous?:ContextSnapshot,forceReason?:string):ContextPlan {
   const controls=Object.fromEntries(Object.entries(request).filter(([key])=>key!=='messages'));

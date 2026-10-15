@@ -3,6 +3,32 @@ import {mkdtemp,readFile,rm} from 'node:fs/promises';import {tmpdir} from 'node:
 import {DirectSessions} from '../packages/gateway/direct-sessions.js';
 const request={model:'copilot-opus-5.5',max_tokens:1000,tools:[],messages:[{role:'user',content:'PRIVATE_SOURCE_SHOULD_NOT_BE_PERSISTED'}]};
 
+test('a client-interrupted request can rebase only after explicit appended user feedback',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'direct-feedback-'));try{
+ const store=new DirectSessions(dir);await store.load();const first=await store.prepare('native-A','a'.repeat(64),request,'first');await store.commit(first,'original-chat');
+ const input={...request,messages:[...request.messages,{role:'assistant',content:'Working'},{role:'user',content:'Do the next step'}]};
+ const interrupted=await store.prepare('native-A','a'.repeat(64),input,'cancelled');await (store.fail as any)(interrupted,true,true);
+ await assert.rejects(store.prepare('native-A','a'.repeat(64),input,'retry'),/uncertain/);
+ const fresh={...input,messages:[...input.messages,{role:'user',content:'Instead use the revised instructions'}]};
+ const next=await store.prepare('native-A','a'.repeat(64),fresh,'feedback');assert.equal(next.plan.kind,'bootstrap');assert.equal(next.plan.reason,'client-interrupted-feedback');assert.equal(next.conversationId,undefined);assert.equal(next.epoch,2);
+ await store.fail(next,false);await assert.rejects(store.prepare('native-A','a'.repeat(64),input,'retry-original'),/uncertain/);
+ const retried=await store.prepare('native-A','a'.repeat(64),fresh,'feedback-retry');assert.equal(retried.plan.kind,'bootstrap');
+ await store.commit(retried,'new-chat');const after=await store.prepare('native-A','a'.repeat(64),{...fresh,messages:[...fresh.messages,{role:'assistant',content:'Done'},{role:'user',content:'One more revision'}]},'after');assert.equal(after.plan.kind,'delta');assert.equal(after.conversationId,'new-chat');
+ const persisted=await readFile(join(dir,'direct-contexts.json'),'utf8');assert.ok(!persisted.includes('revised instructions'));
+ }finally{await rm(dir,{recursive:true,force:true});}
+});
+
+test('merged tool-result feedback survives restart, but tool-only changes and unknown delivery stay blocked',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'direct-feedback-merged-'));try{
+ const store=new DirectSessions(dir);await store.load();const input={...request,messages:[{role:'user',content:[{type:'tool_result',tool_use_id:'question',content:'answer'}]}]};
+ const frame=await store.prepare('native-A','a'.repeat(64),input,'cancelled');await (store.fail as any)(frame,true,true);
+ const loaded=new DirectSessions(dir);await loaded.load();
+ await assert.rejects(loaded.prepare('native-A','a'.repeat(64),{...input,messages:[{role:'user',content:[{type:'tool_result',tool_use_id:'question',content:'changed answer'}]}]},'tool-only'),/uncertain/);
+ const next=await loaded.prepare('native-A','a'.repeat(64),{...input,messages:[{role:'user',content:[...input.messages[0].content,{type:'text',text:'Fresh user feedback'}]}]},'merged');assert.equal(next.plan.reason,'client-interrupted-feedback');
+ await loaded.fail(next,true);await assert.rejects(loaded.prepare('native-A','a'.repeat(64),{...request,messages:[...request.messages,{role:'user',content:'New instruction'}]},'timeout-followup'),/uncertain/);
+ }finally{await rm(dir,{recursive:true,force:true});}
+});
+
 test('parallel native agents have independent leases and continue only their own snapshots',async()=>{
  const dir=await mkdtemp(join(tmpdir(),'direct-agents-'));try{
  const store=new DirectSessions(dir);await store.load();
