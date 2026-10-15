@@ -115,6 +115,7 @@ async function main() {
     if (!['copilot-opus-5.5', 'copilot-sonnet-5.5'].includes(model)) throw new Error('Model must be opus or sonnet');
     const data = await waitForBrowserReady(check,{onWait:status=>console.error(status.active||status.queued?'Copilot bridge is busy; waiting up to 15 seconds for readiness…':'Waiting up to 15 seconds for the Chrome Copilot bridge to become ready…')});
     if(data.status.capabilities?.sessionSyncVersion!==1||!data.status.capabilities?.auxiliaryLanes||data.status.capabilities?.auxiliaryBootstrap!==1)throw new Error('Reload the built Chrome extension and paired workbook before starting the synchronized backend.');
+    if(data.status.capabilities?.cancelContinuation!==1)throw new Error('Reload the matching Chrome extension and refresh the workbook to enable same-chat cancellation continuation.');
     await access(cwd); console.error(`Copilot UI bridge → ${model}\nWorkspace: ${cwd}\nToken counts are LOCAL ESTIMATES; provider billing is unavailable. Native permissions remain active.\nNormal rounds reuse the verified Copilot chat; native compaction rebases its browser context.`);
     const exe = await executable();
     const extra = args[0] === '--' ? args.slice(1) : args;

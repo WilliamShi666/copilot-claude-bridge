@@ -1,0 +1,37 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import {webcrypto} from 'node:crypto';
+import vm from 'node:vm';
+import {JSDOM} from 'jsdom';
+const pause=(ms=10)=>new Promise(r=>setTimeout(r,ms));
+async function until(check:()=>boolean){for(let i=0;i<200;i++){if(check())return;await pause();}throw new Error('Content event deadline');}
+async function fixture(delayJournal=false,delayResultAck=false){
+ const dom=new JSDOM('<button aria-label="Selected model: Claude Opus 5.5"></button><button>New chat</button><button aria-label="Switch mode, current: Chat, Ctrl+Shift+M"></button><span contenteditable="true" role="combobox" aria-label="Chat input"></span><button>Send</button>',{url:'https://fa000000124.officeapps.live.com/taskpane.html',runScripts:'outside-only'});
+ const doc=dom.window.document,storage:any={},messages:any[]=[];let listener:any,sends=0,release!:()=>void,releaseResult!:()=>void;
+ dom.window.HTMLElement.prototype.getClientRects=()=>({length:1}) as any;Object.defineProperty(dom.window.HTMLElement.prototype,'innerText',{get(){return this.textContent;}});
+ (doc as any).execCommand=(_command:string,_ui:boolean,text:string)=>{doc.querySelector('[contenteditable]')!.textContent=text;return true;};
+ doc.querySelectorAll('button')[3].onclick=()=>{sends++;const article=doc.createElement('div');article.setAttribute('role','article');article.className='fai-UserMessage';article.innerHTML='<div class="fai-UserMessage__message"></div>';article.firstElementChild!.textContent=doc.querySelector('[contenteditable]')!.textContent;doc.body.append(article);doc.querySelector('[contenteditable]')!.textContent='';doc.body.insertAdjacentHTML('beforeend','<button id="stop">Stop generating</button>');doc.querySelector<HTMLButtonElement>('#stop')!.onclick=()=>doc.querySelector('#stop')!.remove();};
+ const context=dom.getInternalVMContext();Object.defineProperty(context,'crypto',{value:webcrypto,configurable:true});Object.assign(context,{TextEncoder,MessageChannel,setInterval:()=>1,clearInterval:()=>{},chrome:{storage:{local:{get:async(key:string)=>{if(delayJournal&&key==='job:probe'){delayJournal=false;await new Promise<void>(r=>release=r);}return structuredClone(storage);},set:async(value:any)=>Object.assign(storage,structuredClone(value))}},runtime:{onMessage:{addListener:(fn:any)=>listener=fn},sendMessage:async(value:any)=>{messages.push(value);if(delayResultAck&&value.type==='result'){delayResultAck=false;await new Promise<void>(r=>releaseResult=r);}}}}});
+ vm.runInContext(await readFile('dist/extension/content.js','utf8'),context);
+ const send=(value:any)=>new Promise<any>(resolve=>listener(value,{},resolve));
+ const job={type:'job',id:'probe',modelLabel:'Claude Opus 5.5',prompt:'Transparent coding request',cancelContinuation:1,lane:'main',conversation:{mode:'new',id:'11111111-1111-4111-8111-111111111111',title:'test'}};
+ const cancel={type:'cancel',id:'probe',cancelContinuation:1};const proof={type:'cancel-proof',id:'probe',nonce:'nonce',conversationId:job.conversation.id,lane:'main'};
+ return{dom,doc,storage,messages,send,job,cancel,proof,sends:()=>sends,release:()=>release(),releaseResult:()=>releaseResult?.()};
+}
+test('cancel before the journal lookup finishes prevents the delayed page job from sending',async()=>{
+ const f=await fixture(true);try{await f.send(f.job);await f.send(f.cancel);const proof=await f.send(f.proof);assert.equal(proof.receipt.outcome,'not_sent');f.release();await until(()=>f.messages.some(e=>e.type==='failure'));assert.equal(f.sends(),0);assert.equal(f.storage['cancel-proof:probe'].nonce,'nonce');assert.equal(f.storage['cancel:probe'],undefined);}finally{f.dom.window.close();}
+});
+test('partial JSON is discarded and durable duplicate cancellation proof never becomes a result',async()=>{
+ const f=await fixture();try{await f.send(f.job);await until(()=>f.sends()===1);f.doc.body.insertAdjacentHTML('beforeend','<div class="fai-CopilotMessage" role="article"><div class="fai-CopilotMessage__content">{"content":[{"type":"tool_use",</div></div>');await f.send(f.cancel);await until(()=>f.storage['job:probe']?.phase==='failed');assert.equal((await f.send(f.proof)).pending,true);await pause(400);const first=await f.send(f.proof);assert.equal(first.receipt.replyState,'partial');assert.equal(first.receipt.outcome,'settled');assert.deepEqual(structuredClone(await f.send(f.proof)),structuredClone(first));assert.equal(f.messages.some(e=>e.type==='result'||e.type==='failure'),false);assert.equal(f.sends(),1);}finally{f.dom.window.close();}
+});
+test('cancellation at the completed response edge retains page evidence without submitting a new turn',async()=>{
+ const f=await fixture();try{await f.send(f.job);await until(()=>f.sends()===1);f.doc.querySelector('#stop')!.remove();f.doc.body.insertAdjacentHTML('beforeend','<div class="fai-CopilotMessage" role="article"><div class="fai-CopilotMessage__content">{"content":[{"type":"text","text":"done"}]}</div><div role="toolbar"><button>Copy</button></div></div>');await until(()=>f.messages.some(e=>e.type==='result'));await f.send(f.cancel);await f.send(f.proof);await pause(400);const proof=await f.send(f.proof);assert.equal(proof.receipt.outcome,'settled');assert.equal(proof.receipt.replyState,'complete');assert.equal(f.sends(),1);}finally{f.dom.window.close();}
+});
+
+test('next native tool round can start before the prior result runtime ACK without an uncertain failure',async()=>{
+ const f=await fixture(false,true);try{await f.send(f.job);await until(()=>f.sends()===1);f.doc.querySelector('#stop')!.remove();f.doc.body.insertAdjacentHTML('beforeend','<div class="fai-CopilotMessage" role="article"><div class="fai-CopilotMessage__content">{"content":[{"type":"text","text":"done"}]}</div><div role="toolbar"><button>Copy</button></div></div>');await until(()=>f.messages.some(e=>e.type==='result'));const receipt=f.messages.find(e=>e.type==='result').conversation;await f.send({...f.job,id:'second',prompt:'Next actual tool result',conversation:{...f.job.conversation,mode:'continue',expectedCursor:receipt.cursor,userCursor:receipt.userCursor,cursorVersion:receipt.cursorVersion,pageInstance:receipt.pageInstance}});await until(()=>f.sends()===2||f.messages.some(e=>e.type==='failure'&&e.id==='second'));assert.equal(f.sends(),2);assert.equal(f.messages.some(e=>e.type==='failure'&&e.id==='second'),false);f.releaseResult();await pause();const latestReady=f.messages.filter(e=>e.type==='frame-ready').at(-1);assert.equal(latestReady?.ready,false);await f.send({...f.cancel,id:'second'});await until(()=>f.storage['job:second']?.phase==='failed');}finally{f.releaseResult();f.dom.window.close();}
+});
+
+
+for(const reason of ['Copilot blocked the response by content filtering','Copilot refused external-client relay use'])test('stored terminal refusal retains its controlled cause in cancellation proof: '+reason,async()=>{const f=await fixture();try{f.storage['job:probe']={id:'probe',phase:'failed',code:'provider_refusal',error:reason,submitted:true,updated:Date.now()};const proof=await f.send(f.proof);assert.equal(proof.receipt.reason,'provider_refusal');assert.equal(proof.receipt.refusalKind,reason.includes('content filtering')?'content_filtering':'external_client_relay');assert.equal(f.sends(),0);assert.deepEqual(structuredClone(await f.send(f.proof)),structuredClone(proof));}finally{f.dom.window.close();}});

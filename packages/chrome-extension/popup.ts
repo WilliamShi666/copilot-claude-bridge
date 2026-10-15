@@ -6,18 +6,20 @@ let selectedTab: chrome.tabs.Tab | undefined;
 let pairedUrl: string | undefined;
 let savedUrls:string[]=[];
 let gatewayEdited = false, codeEdited = false;
+const imagePermission=document.getElementById('image-permission') as HTMLButtonElement|null;let imageGranted=false,imageEnabled=false;
 el<HTMLInputElement>('url').addEventListener('input', () => { gatewayEdited = true;updateButton(); });
 el<HTMLInputElement>('code').addEventListener('input', () => { codeEdited = true; });
 pair.disabled = true;
 function updateButton(){const url=el<HTMLInputElement>('url').value.trim();pair.textContent=pairedUrl===url?'Use selected Excel tab':savedUrls.includes(url)?'Switch gateway and use selected tab':'Pair selected Excel tab';}
 async function refresh() {
-  const data = await chrome.storage.local.get(['status', 'config', 'savedPairings', 'pairIntent', 'pairingStatus']);
+  const data = await chrome.storage.local.get(['status', 'config', 'savedPairings', 'pairIntent', 'pairingStatus','imageInputEnabled']);
   const config = data.config as { url: string } | undefined;
   pairedUrl = config?.url;
   savedUrls=Object.keys(data.savedPairings??{}).filter(url=>/^http:\/\/127\.0\.0\.1:\d+$/.test(url));
   const choices=document.getElementById('gateways');if(choices)choices.innerHTML=savedUrls.map(url=>'<option value="'+url+'"></option>').join('');
   const pending = data.pairIntent as { url: string; code: string } | undefined;
   const connection = data.status as { connected?: boolean; ready?: boolean; error?: string } | undefined;
+  if(imagePermission){imageGranted=await chrome.permissions.contains({permissions:['debugger']});imageEnabled=data.imageInputEnabled===true;imagePermission.textContent=!imageGranted?'Image build required':imageEnabled?'Disable image input':'Enable image input';imagePermission.disabled=!imageGranted||(data.status as any)?.busy===true;}
   const progress = data.pairingStatus as { phase: string; error?: string } | undefined;
   if (config && !gatewayEdited) el<HTMLInputElement>('url').value = config.url;
   else if (!config && pending) {
@@ -54,3 +56,7 @@ el<HTMLButtonElement>('pair').onclick = async () => {
 };
 el<HTMLButtonElement>('unpair').onclick = async () => {try{const response=await chrome.runtime.sendMessage({type:'unpair'});if(response?.error)throw new Error(response.error);await chrome.permissions.remove({origins:OFFICE_ORIGINS});await refresh();}catch(error){status.textContent=error instanceof Error?error.message:'Disconnect failed';}};
 chrome.storage.onChanged.addListener(() => { void refresh(); });
+if(imagePermission)imagePermission.onclick=async()=>{
+ try{const response=await chrome.runtime.sendMessage({type:'image-input-toggle',enabled:!imageEnabled});if(response?.error)throw new Error(response.error);await refresh();}
+ catch(error){status.textContent=error instanceof Error?error.message:'Image input was not changed';}
+};
