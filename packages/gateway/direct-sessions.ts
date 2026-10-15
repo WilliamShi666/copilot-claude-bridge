@@ -1,10 +1,10 @@
 import type {MessagesRequest} from '../protocol/index.js';
 import {BridgeError} from '../protocol/index.js';
-import type {ContextPlan,ContextSnapshot} from '../protocol/context.js';
-import {planContext} from '../protocol/context.js';
+import type {ContextPlan,ContextSnapshot,FeedbackCheckpoint} from '../protocol/context.js';
+import {planContext,feedbackCheckpoint,appendedUserFeedback} from '../protocol/context.js';
 import {readFile,writeFile,rename,mkdir} from 'node:fs/promises';import {join} from 'node:path';import {createHash} from 'node:crypto';
-export interface DirectFrame {key:string;sessionId:string;agentId?:string;workspaceKey:string;model:string;jobId:string;epoch:number;conversationId?:string;plan:ContextPlan;compactSequence:number}
-interface DirectRecord {key:string;sessionId:string;agentId?:string;workspaceKey:string;model:string;epoch:number;state:'ready'|'busy'|'uncertain';jobId?:string;conversationId?:string;snapshot?:ContextSnapshot;compactSequence:number;resetReason?:string;updated:string}
+export interface DirectFrame {key:string;sessionId:string;agentId?:string;workspaceKey:string;model:string;jobId:string;epoch:number;conversationId?:string;plan:ContextPlan;compactSequence:number;feedback:FeedbackCheckpoint;recoveryCheckpoint?:FeedbackCheckpoint}
+interface DirectRecord {key:string;sessionId:string;agentId?:string;workspaceKey:string;model:string;epoch:number;state:'ready'|'busy'|'uncertain';jobId?:string;conversationId?:string;snapshot?:ContextSnapshot;compactSequence:number;resetReason?:string;interruption?:FeedbackCheckpoint;updated:string}
 interface CompactState {sessionId:string;agentId?:string;workspaceKey?:string;phase:'running'|'ready';sequence:number;trigger:string}
 export function validSession(value:unknown):value is string{return typeof value==='string'&&/^[A-Za-z0-9._:-]{1,128}$/.test(value);}
 export function validAgent(value:unknown):value is string{return typeof value==='string'&&/^[A-Za-z0-9._:@-]{1,200}$/.test(value);}
@@ -19,6 +19,7 @@ export class DirectSessions {
   for(const record of saved.records){
    if(!validSession(record.sessionId)||(record.agentId!==undefined&&!validAgent(record.agentId))||typeof record.key!=='string'||! /^[a-f0-9]{64}$/.test(record.workspaceKey)||!Number.isInteger(record.epoch)||!['ready','busy','uncertain'].includes(record.state))throw new Error('Invalid direct context record');
    if(record.snapshot&&(!Array.isArray(record.snapshot.messageHashes)||record.snapshot.messageHashes.length>10000||!record.snapshot.messageHashes.every((h:any)=>typeof h==='string'&&/^[a-f0-9]{64}$/.test(h))||!record.snapshot.controlHashes||!Object.values(record.snapshot.controlHashes).every(h=>typeof h==='string'&&/^[a-f0-9]{64}$/.test(h))))throw new Error('Invalid direct context fingerprints');
+   if(record.interruption){const value=record.interruption;if(!value.snapshot||!Array.isArray(value.snapshot.messageHashes)||value.snapshot.messageHashes.length>10000||!value.snapshot.messageHashes.every((h:any)=>typeof h==='string'&&/^[a-f0-9]{64}$/.test(h))||!value.snapshot.controlHashes||!Object.values(value.snapshot.controlHashes).every(h=>typeof h==='string'&&/^[a-f0-9]{64}$/.test(h))||(value.tailUserBlockHashes!==undefined&&(!Array.isArray(value.tailUserBlockHashes)||value.tailUserBlockHashes.length>10000||!value.tailUserBlockHashes.every((h:any)=>typeof h==='string'&&/^[a-f0-9]{64}$/.test(h)))))throw new Error('Invalid interruption fingerprints');}
    if(record.state==='busy'){record.state='uncertain';delete record.jobId;}
    this.records.set(record.key,record);
   }
@@ -33,20 +34,24 @@ export class DirectSessions {
   const key=createHash('sha256').update(sessionId+'\0'+request.model+(agentId===undefined?'':'\0'+agentId)).digest('hex');let record=this.records.get(key);
   if(record&&record.workspaceKey!==workspaceKey){if(record.resetReason==='manual-resync')record.workspaceKey=workspaceKey;else throw new BridgeError('Native session workspace changed; explicit resynchronization is required',409);}
   if(record?.state==='busy')throw new BridgeError('Native context is busy; overlapping main requests are not mixed',409);
-  if(record?.state==='uncertain')throw new BridgeError('Native context delivery is uncertain. Use context-reset --session '+sessionId+(agentId?' --agent '+agentId:'')+' before resynchronizing.',409);
+  const interruptedFeedback=record?.state==='uncertain'&&record.interruption&&appendedUserFeedback(request,record.interruption);
+  if(record?.state==='uncertain'&&!interruptedFeedback)throw new BridgeError('Native context delivery is uncertain. Use context-reset --session '+sessionId+(agentId?' --agent '+agentId:'')+' before resynchronizing.',409);
   if(!record){if(this.records.size>=100)throw new BridgeError('Native context registry is full',429);record={key,sessionId,agentId,workspaceKey,model:request.model,epoch:0,state:'ready',compactSequence:0,updated:new Date().toISOString()};this.records.set(key,record);}
   const compact=this.compactions.get(scopeKey(sessionId,agentId));const sequence=compact?.sequence??0;
-  const force=record.resetReason??(contextCompacted||sequence>record.compactSequence?'native-compaction':undefined);
+  const force=record.resetReason??(interruptedFeedback?'client-interrupted-feedback':contextCompacted||sequence>record.compactSequence?'native-compaction':undefined);
   const plan=planContext(request,record.snapshot,force);
   if(plan.snapshot.messageHashes.length>10000)throw new BridgeError('Native history fingerprint limit exceeded',413);
-  record.state='busy';record.jobId=jobId;record.updated=new Date().toISOString();await this.persist();
-  return {key,sessionId,agentId,workspaceKey,model:request.model,jobId,epoch:record.epoch+(plan.kind==='bootstrap'?1:0),conversationId:plan.kind==='delta'?record.conversationId:undefined,plan,compactSequence:sequence};
+  const feedback=feedbackCheckpoint(request,plan.snapshot);if((feedback.tailUserBlockHashes?.length??0)>10000)throw new BridgeError('Native feedback fingerprint limit exceeded',413);
+  const recoveryCheckpoint=interruptedFeedback?record.interruption:undefined;
+  if(interruptedFeedback)record.resetReason='client-interrupted-feedback';
+  record.state='busy';record.jobId=jobId;delete record.interruption;record.updated=new Date().toISOString();await this.persist();
+  return {key,sessionId,agentId,workspaceKey,model:request.model,jobId,epoch:record.epoch+(plan.kind==='bootstrap'?1:0),conversationId:plan.kind==='delta'?record.conversationId:undefined,plan,compactSequence:sequence,feedback,recoveryCheckpoint};
  }
  async commit(frame:DirectFrame,conversationId:string){
   const record=this.records.get(frame.key);if(!record||record.state!=='busy'||record.jobId!==frame.jobId)throw new BridgeError('Native context lease changed',409);
   record.epoch=frame.epoch;record.conversationId=conversationId;record.snapshot=frame.plan.snapshot;record.compactSequence=frame.compactSequence;record.state='ready';delete record.jobId;delete record.resetReason;record.updated=new Date().toISOString();await this.persist();
  }
- async fail(frame:DirectFrame,uncertain:boolean){const record=this.records.get(frame.key);if(!record||record.jobId!==frame.jobId)return;record.state=uncertain?'uncertain':'ready';delete record.jobId;record.updated=new Date().toISOString();await this.persist();}
+ async fail(frame:DirectFrame,uncertain:boolean,clientInterrupted=false){const record=this.records.get(frame.key);if(!record||record.jobId!==frame.jobId)return;const checkpoint=uncertain?(clientInterrupted?frame.feedback:undefined):frame.recoveryCheckpoint;record.state=uncertain||checkpoint?'uncertain':'ready';if(checkpoint)record.interruption=checkpoint;else delete record.interruption;delete record.jobId;record.updated=new Date().toISOString();await this.persist();}
  async compact(sessionId:string,workspaceKey:string|undefined,event:'PreCompact'|'PostCompact',trigger:string,agentId?:string){
   if(!validSession(sessionId)||(agentId!==undefined&&!validAgent(agentId))||(workspaceKey!==undefined&&!/^[a-f0-9]{64}$/.test(workspaceKey)))throw new BridgeError('Invalid compaction identity');
   for(const record of this.records.values())if(record.sessionId===sessionId&&record.agentId===agentId&&workspaceKey&&workspaceKey!==record.workspaceKey)throw new BridgeError('Compaction workspace does not match',409);

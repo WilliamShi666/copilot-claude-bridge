@@ -34,6 +34,21 @@ test('three native agents queue behind a main request, keep independent chats, a
  const parent=s.send({...request('MAIN_ONLY'),messages:[{role:'user',content:'MAIN_ONLY'},{role:'assistant',content:'reply'},{role:'user',content:'PARENT_CONTINUES'}]});await until(()=>s.jobs.length===6);assert.equal(s.jobs[5].conversation.id,s.jobs[0].conversation.id);s.reply(s.jobs[5]);assert.equal((await parent).status,200);
  }finally{await s.close();}
 });
+
+test('feedback after a dispatched client cancellation starts a fresh chat without replaying the cancelled request',async()=>{
+ const s=await setup();try{
+ const input={...request('ORIGINAL'),stream:true};const controller=new AbortController();const response=await s.send(input,undefined,controller.signal);const discarded=response.text().catch(()=>undefined);
+ await until(()=>s.jobs.length===1);const old=s.jobs[0];controller.abort();await discarded;await until(()=>s.cancelled.includes(old.id));
+ await until(()=>s.g.status().nativeContexts.some(c=>c.state==='uncertain'));
+ const retry=await s.send(input);assert.equal(retry.status,409);assert.equal(s.jobs.length,1);
+ s.ws.send(JSON.stringify({type:'failure',id:old.id,error:'Aborted',submitted:true}));s.ws.send(JSON.stringify({type:'ready',ready:true}));
+ const fresh={...request('ORIGINAL'),messages:[{role:'user',content:'ORIGINAL'},{role:'user',content:'REVISED_FEEDBACK'}]};
+ const next=s.send(fresh);await until(()=>s.jobs.length===2);assert.equal(s.jobs[1].conversation.mode,'new');assert.notEqual(s.jobs[1].conversation.id,old.conversation.id);assert.ok(s.jobs[1].prompt.includes('client-interrupted-feedback'));assert.ok(s.jobs[1].prompt.includes('REVISED_FEEDBACK'));
+ s.reply(s.jobs[1]);assert.equal((await next).status,200);
+ const after=s.send({...fresh,messages:[...fresh.messages,{role:'assistant',content:'reply'},{role:'user',content:'FEEDBACK_AFTER_DONE'}]});await until(()=>s.jobs.length===3);assert.equal(s.jobs[2].conversation.id,s.jobs[1].conversation.id);assert.equal(s.jobs[2].conversation.mode,'continue');s.reply(s.jobs[2]);assert.equal((await after).status,200);
+ assert.equal(s.jobs.filter(j=>j.id===old.id).length,1);
+ }finally{await s.close();}
+});
 test('canceling a queued agent never cancels the active sibling and leaves its context retryable',async()=>{
  const s=await setup();try{
  const active=s.send(request('ACTIVE'),'writer-a');await until(()=>s.jobs.length===1);

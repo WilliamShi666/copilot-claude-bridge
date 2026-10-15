@@ -71,6 +71,8 @@ WSL 仓库内使用 `bash ./start-copilot.sh /mnt/d/my-project`。Windows 默认
 
 **409 上下文投递不确定：** 先等待或取消当前请求，再按错误中显示的原生 session ID 执行：
 
+正常完成后的反馈会继续原聊天。若原生客户端中断了一条已发送的请求，随后明确追加新的用户反馈，桥接器会在新 Copilot 聊天完整同步最新原生历史；不会重发旧请求。原样重试、仅工具结果变化、旧历史被重写或其他投递不明情况仍保留 409 保护。旧版留下的错误需要按下方命令恢复一次。
+
 ```powershell
 node dist/packages/cli/index.js context-reset --session <native-session-id>
 ```

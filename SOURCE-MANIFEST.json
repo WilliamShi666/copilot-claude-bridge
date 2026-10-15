@@ -30,8 +30,8 @@
     },
     {
       "path": "CHANGELOG.md",
-      "bytes": 2169,
-      "sha256": "21a9c627b0f4149701e0b35cad6808bb92aad922a2bc42216bcd9a3f7dbf3fa7"
+      "bytes": 2356,
+      "sha256": "cb41e60e1c01aaee7622840bf1e2018941df938115d074af6e2aa680f51c987a"
     },
     {
       "path": "CONTRIBUTING.md",
@@ -45,13 +45,13 @@
     },
     {
       "path": "README.en.md",
-      "bytes": 10511,
-      "sha256": "06f1b6a4efe63019579ce9d9b93673a2242b845acbb9cff49ac8defede51454e"
+      "bytes": 10952,
+      "sha256": "c961aefb63fc9ee2302d6c74de5ef7bd14cce3ea04dce771e828d89cb7e655a7"
     },
     {
       "path": "README.md",
-      "bytes": 8053,
-      "sha256": "4ce4e1d09013210c8d8cd0bff35b1cab2b0aa27fb5164d877b35e315dd240111"
+      "bytes": 8447,
+      "sha256": "3fb921d21166b8c8c75bd6cac716ab3ad25fcc8466f1d334a77310524fc4b5ed"
     },
     {
       "path": "README.zh-CN.md",
@@ -65,8 +65,8 @@
     },
     {
       "path": "docs/public/context.md",
-      "bytes": 4478,
-      "sha256": "7caa6e787d61eca93b81b2631a74fe70384b343f8fcd15c0c0f595f382ceca63"
+      "bytes": 5254,
+      "sha256": "12ded8130828a2315836b0ab91fcf0d2aa929bfe0ac25b4100d43adf85edb12f"
     },
     {
       "path": "docs/public/desktop-advisor.md",
@@ -95,8 +95,8 @@
     },
     {
       "path": "docs/public/validation.md",
-      "bytes": 6777,
-      "sha256": "3b1351494f0e6604d524831d93b17d2e6176c0b7f7725af5d3cebc17d8175834"
+      "bytes": 8170,
+      "sha256": "eff855a1a0ea34ea59ab7e98339848f831834acbc74d37f8043323e81c5d43a2"
     },
     {
       "path": "docs/public/wsl.md",
@@ -235,13 +235,13 @@
     },
     {
       "path": "packages/gateway/direct-sessions.ts",
-      "bytes": 8950,
-      "sha256": "21e25b980fcb44f8cdedaca6240e0432eaf638c55217d8dc59fa0d92d1aaa637"
+      "bytes": 10575,
+      "sha256": "51cf712d042ea0528e43fac71f0f31a9633fc9cb6c3ccabfbc6511d0480aace1"
     },
     {
       "path": "packages/gateway/index.ts",
-      "bytes": 32006,
-      "sha256": "7edff61c883decad6dc992b0aff932a5c1e1e9ab217574333e72ff2b22168f6e"
+      "bytes": 32032,
+      "sha256": "a4641d92ab3c46d3925adb2236d048682f0addcfe0ce6b078aca712a813382ba"
     },
     {
       "path": "packages/gateway/summary-prompt.ts",
@@ -250,8 +250,8 @@
     },
     {
       "path": "packages/protocol/context.ts",
-      "bytes": 4129,
-      "sha256": "d6ddb87ff77bd83069423908711777db9d8ea69d2f11e1edbfb37110f7c0b71a"
+      "bytes": 5819,
+      "sha256": "a0526fcd8112fe0f741746513a9784f7e4a6b68b922ae4c78d5fc23eaafa37f2"
     },
     {
       "path": "packages/protocol/conversation.ts",
@@ -325,8 +325,8 @@
     },
     {
       "path": "tests/agent-gateway.test.ts",
-      "bytes": 7310,
-      "sha256": "9b4b258ff7115b0d737627c1b7c905eea873cd784f16aaad076aa500d6cdb97b"
+      "bytes": 9045,
+      "sha256": "7e69ad099a8606a183aad6c564c881d1e555dbd790f3df7c6f6fb56f201b604c"
     },
     {
       "path": "tests/auxiliary-tabs.test.ts",
@@ -365,8 +365,8 @@
     },
     {
       "path": "tests/context.test.ts",
-      "bytes": 5085,
-      "sha256": "bea82636233dec9aebe6393ee51b72be4c1c515c13627b2f23fa9e6fb1535308"
+      "bytes": 7289,
+      "sha256": "45da2f5167225882f1948a9deb6f9152b2295aca989ff9310ac1653a11fb1d28"
     },
     {
       "path": "tests/conversation-adapter.test.ts",
@@ -385,8 +385,8 @@
     },
     {
       "path": "tests/direct-sessions.test.ts",
-      "bytes": 7928,
-      "sha256": "d729cd2c261865b5cf0b2bc8044e33b502ff8294c81a59c1f6806df49cfc6486"
+      "bytes": 11021,
+      "sha256": "0d23ba4b8f82065513d8565ab4962dbf8006a733b4bfb9568b27e9850545c091"
     },
     {
       "path": "tests/evidence.test.ts",

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Continue after an interrupted native request when the user explicitly appends feedback, rebasing current native context in a fresh Copilot chat while keeping ambiguous retries blocked.
 - Start Windows or WSL Claude Code through repository launchers that reuse a running gateway or start it in the background after it stops.
 - Add first-install, daily-start, restart recovery and Windows/WSL switching instructions in Chinese, with linked English instructions.
 - Preserve gateway address and pairing-code edits while the Chrome popup refreshes connection status.
