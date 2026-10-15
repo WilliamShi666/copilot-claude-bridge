@@ -1,8 +1,11 @@
 import { execFileSync } from 'node:child_process';
-import { mkdir, copyFile } from 'node:fs/promises';
+import { mkdir, copyFile,readFile,writeFile } from 'node:fs/promises';
 import { build } from 'esbuild';
 execFileSync(process.execPath, ['node_modules/typescript/bin/tsc'], { stdio: 'inherit' });
+const args=process.argv.slice(2);if(args.some(arg=>arg!=='--image-input'))throw new Error('Usage: node scripts/build.mjs [--image-input]');
+const {extensionManifest}=await import('../dist/packages/chrome-extension/manifest-profile.js');
 await mkdir('dist/extension', { recursive: true });
-for (const name of ['manifest.json', 'popup.html', 'popup.css']) await copyFile('packages/chrome-extension/' + name, 'dist/extension/' + name);
+for (const name of ['popup.html', 'popup.css']) await copyFile('packages/chrome-extension/' + name, 'dist/extension/' + name);
+await writeFile('dist/extension/manifest.json',JSON.stringify(extensionManifest(JSON.parse(await readFile('packages/chrome-extension/manifest.json','utf8')),args.includes('--image-input')),null,2)+'\n');
 await build({ entryPoints: ['packages/chrome-extension/background.ts', 'packages/chrome-extension/content.ts', 'packages/chrome-extension/office-host.ts', 'packages/chrome-extension/popup.ts'], outdir: 'dist/extension', bundle: true, platform: 'browser', target: 'chrome120', format: 'iife' });
 console.log('Gateway, CLI and Chrome extension built.');

@@ -1,7 +1,25 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 import {mkdtemp,readFile,rm} from 'node:fs/promises';import {tmpdir} from 'node:os';import {join} from 'node:path';
 import {DirectSessions} from '../packages/gateway/direct-sessions.js';
+import type {CancelReceipt} from '../packages/protocol/cancellation.js';
 const request={model:'copilot-opus-5.5',max_tokens:1000,tools:[],messages:[{role:'user',content:'PRIVATE_SOURCE_SHOULD_NOT_BE_PERSISTED'}]};
+const cancellation=(frame:any,conversationId:string,overrides:Partial<CancelReceipt>={}):CancelReceipt=>({version:1,jobId:frame.jobId,nonce:'nonce',conversationId,lane:'main',outcome:'settled',inputComplete:true,replyState:'partial',cursor:'a'.repeat(64),pageInstance:'page-1',...overrides});
+
+test('an incomplete bootstrap never borrows the previous chat history to resume a new chat',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'direct-partial-bootstrap-'));try{
+  const store=new DirectSessions(dir);await store.load();const first=await store.prepare('native-A','a'.repeat(64),request,'first');await store.commit(first,'chat-one');
+  const compacted={...request,messages:[{role:'user',content:'Actual new compacted history'}]};const frame=await store.prepare('native-A','a'.repeat(64),compacted,'compact',true,undefined,true);assert.equal(frame.plan.kind,'bootstrap');await store.beginCancellation(frame);await store.settleCancellation(frame,cancellation(frame,'chat-two',{inputComplete:false}));
+  const feedback={...compacted,messages:[...compacted.messages,{role:'user',content:'Continue'}]},next=await store.prepare('native-A','a'.repeat(64),feedback,'recovery',false,undefined,true);assert.equal(next.plan.kind,'bootstrap');assert.equal(next.isolatedRecovery,true);assert.equal(next.conversationId,undefined);assert.equal(next.epoch,3);
+ }finally{await rm(dir,{recursive:true,force:true});}
+});
+
+test('not_sent restores committed context; three confirmed interruptions keep one chat and epoch',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'direct-three-cancels-'));try{
+  const store=new DirectSessions(dir);await store.load();const first=await store.prepare('native-A','a'.repeat(64),request,'first');await store.commit(first,'chat-one');
+  const unsent=await store.prepare('native-A','a'.repeat(64),request,'unsent',false,undefined,true);await store.beginCancellation(unsent);await store.settleCancellation(unsent,cancellation(unsent,'chat-one',{outcome:'not_sent',inputComplete:false}));
+  let input={...request};for(let i=0;i<3;i++){const cancelled=await store.prepare('native-A','a'.repeat(64),input,'cancel-'+i,false,undefined,true);await store.beginCancellation(cancelled);await store.settleCancellation(cancelled,cancellation(cancelled,'chat-one'));input={...input,messages:[...input.messages,{role:'user',content:'Continue '+i}]};const resumed=await store.prepare('native-A','a'.repeat(64),input,'resume-'+i,false,undefined,true);assert.equal(resumed.conversationId,'chat-one');assert.equal(resumed.epoch,1);assert.equal(resumed.plan.kind,'resume');await store.commit(resumed,'chat-one');}
+ }finally{await rm(dir,{recursive:true,force:true});}
+});
 
 test('a client-interrupted request can rebase only after explicit appended user feedback',async()=>{
  const dir=await mkdtemp(join(tmpdir(),'direct-feedback-'));try{
@@ -102,3 +120,6 @@ test('rejected reset leaves every model for an agent unchanged',async()=>{
  await store.fail(next,false);await store.fail(active,false);
  }finally{await rm(dir,{recursive:true,force:true});}
 });
+
+
+test('uncertain SDK retries retain the original operational failure across restart',async()=>{const dir=await mkdtemp(join(tmpdir(),'direct-delivery-cause-'));try{const store=new DirectSessions(dir);await store.load();const frame=await store.prepare('native-A','a'.repeat(64),request,'image-submit');await store.fail(frame,true,false,'Image submission acknowledgement timed out');const loaded=new DirectSessions(dir);await loaded.load();for(const max_tokens of [1000,32000])await assert.rejects(loaded.prepare('native-A','a'.repeat(64),{...request,max_tokens},'retry'),/uncertain[\s\S]*Last failure: Image submission acknowledgement timed out/);await loaded.reset('native-A');const next=await loaded.prepare('native-A','a'.repeat(64),request,'reset');await loaded.commit(next,'new-chat');const saved=await readFile(join(dir,'direct-contexts.json'),'utf8');assert.ok(!saved.includes('acknowledgement timed out'));}finally{await rm(dir,{recursive:true,force:true});}});

@@ -5,5 +5,7 @@
 <p>Windows normally uses port 59173; WSL uses 59175. Pair each gateway once. To switch to a saved gateway, select its address, leave the code empty and click Switch gateway. Finish pending requests first.</p>
 <p class="permissions">Pairing requests access to the Copilot add-in and Excel frame. The selected workbook is the main conversation; bridge-owned auxiliary workbook tabs isolate title and summary requests. Other user tabs are not operated. No Microsoft passwords, cookies, or login tokens are read.</p>
 <button id="pair">Pair selected Excel tab</button><button id="unpair">Disconnect and clear pairing</button>
+<p class="permissions">The image-enabled build adds Chrome's powerful required debugger permission; the default text build omits it. Image input starts off. When enabled, it briefly simulates focus for the verified image page, presses Enter once, restores focus emulation and detaches; Chrome may show a debugging banner. Disable stops use but does not revoke the build's permission. Reinstall the default text build to remove it. No network/cookie/other-tab debugging commands are used.</p>
+<button id="image-permission">Enable image input</button>
 <pre id="status" role="status">Not paired</pre><p>Experimental UI transport. Token counts may be local estimates; measured provider usage and billing are unavailable.</p>
 </main><script src="popup.js"></script></html>

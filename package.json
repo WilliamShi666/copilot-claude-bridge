@@ -12,6 +12,7 @@
   },
   "scripts": {
     "build": "node scripts/build.mjs",
+    "build:images": "node scripts/build.mjs --image-input",
     "build:desktop": "node scripts/build-desktop.mjs",
     "typecheck": "tsc --noEmit",
     "test": "npm run build && node --test dist/tests/*.test.js",

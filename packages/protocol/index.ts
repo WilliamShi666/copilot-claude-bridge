@@ -2,6 +2,7 @@ import AjvModule from 'ajv';
 import Ajv2020Module from 'ajv/dist/2020.js';
 import Ajv2019Module from 'ajv/dist/2019.js';
 import { randomUUID } from 'node:crypto';
+import {validateImage} from './images.js';
 const Ajv = AjvModule.default;
 const ajv = new Ajv({ strict: false, allErrors: true, validateFormats: false });
 const ajv2020 = new Ajv2020Module.default({ strict: false, allErrors: true, validateFormats: false });
@@ -24,6 +25,7 @@ function validateContent(content: unknown, ids: Set<string>, results: Set<string
   for (const block of content) {
     if (!object(block)) throw new BridgeError('Invalid content block');
     if (block.type === 'text' && typeof block.text === 'string') continue;
+    if(block.type==='image'&&(role==='user'||role==='tool-result')){validateImage(block);continue;}
     if (block.type === 'tool_use' && role === 'assistant' && typeof block.id === 'string' && typeof block.name === 'string' && object(block.input)) {
       if (ids.has(block.id)) throw new BridgeError('Duplicate tool use identifier');
       ids.add(block.id); continue;
@@ -32,7 +34,7 @@ function validateContent(content: unknown, ids: Set<string>, results: Set<string
       if (!ids.has(block.tool_use_id) || results.has(block.tool_use_id)) throw new BridgeError('Unmatched or duplicate tool result');
       results.add(block.tool_use_id); validateContent(block.content ?? '', ids, results, 'tool-result'); continue;
     }
-    throw new BridgeError(`Unsupported content block: ${String(block.type)}. Text and native tool blocks are supported; media and signed reasoning are not.`);
+    throw new BridgeError(`Unsupported content block: ${String(block.type)}. Text, native tool blocks and base64 images are supported; other media and signed reasoning are not.`);
   }
 }
 export function parseRequest(value: unknown): MessagesRequest {

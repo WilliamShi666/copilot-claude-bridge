@@ -92,9 +92,15 @@ Native Auto mode passed a limited live check: three named teammates started toge
 
 Keep Chrome, the paired workbook and Copilot open. Do not manually switch that chat during a request. If the extension was rebuilt, reload it, refresh the workbook and select **Use selected Excel tab** when already paired. After restarting a gateway, run `doctor` again.
 
-If the client reports **409 Native context delivery is uncertain**, first let the request finish or cancel it; then use the native session ID shown in the error:
+After a native interruption, the bridge stops the matching browser generation and waits up to 15 seconds for a correlated cancellation receipt. New feedback waits for confirmation. A verified original page continues in the same chat and epoch using a recovery delta; unchanged system instructions and tool schemas are not resent. Cancelled browser tool calls are discarded. Actual local tool results remain authoritative.
 
-Feedback after a completed task continues the existing chat. After a client interrupts a dispatched request, explicitly appended user feedback can bootstrap the complete latest native history in a fresh Copilot chat. The canceled request is never replayed. Identical retries, tool-only changes, rewritten history and other unknown delivery still require explicit recovery. Errors left by older gateway versions need a one-time reset below.
+If the original chat is closed, changed, has a new draft, or cannot be verified, each feedback request gets at most one complete rebuild in a new bridge-owned workbook tab. The old page and draft are preserved, and the response visibly reports full synchronization. Ordinary feedback after completion continues incrementally. Real compaction and substantive history changes still require complete synchronization.
+
+A clear upstream refusal is a separate, nonretryable error. It never triggers another chat or model attempt, and a retry changing only `max_tokens` retains the original reason. `context-reset` does not resolve a provider refusal.
+
+Update the gateway and extension together, reload the extension, and refresh the workbook. `doctor` must show `capabilities.cancelContinuation: 1`; launch commands are unchanged.
+
+Older uncertain records without cancellation receipts or a verifiable interruption checkpoint still require explicit recovery. Check actual tool effects before using the native session ID from a **409 Native context delivery is uncertain** error:
 
 ```powershell
 node dist/packages/cli/index.js context-reset --session <native-session-id>
@@ -124,7 +130,11 @@ This mode requires an independently working original model/provider. The optiona
 
 Direct mode sends the client's context and tool output to Copilot, which can include private code and secrets. See [SECURITY.md](SECURITY.md) for data flow, local storage and extension permissions.
 
-This is a text-only UI transport with buffered responses, local token estimates and no measured provider billing. UI changes, account limits, policy refusals and malformed replies can interrupt tasks. Multimodal content, signed thinking, exact API caching and arbitrary long-running/subagent flows are not guaranteed. See [limitations](docs/public/limitations.md).
+Image input requires the optional image build: run `npm run build:images`, then reload the extension. It adds the powerful required Chrome `debugger` permission; explicitly approve that increased access before installation/reload. The default `npm run build` text profile omits it. The image build additionally starts with **Enable image input** off. It waits for attachment upload to finish; a decoded preview alone does not mean the upload is complete. This implementation temporarily emulates target-page focus, sends one Enter to the verified native Send button, retains scoped focus until the owned message is acknowledged, then restores focus emulation and detaches; Chrome may show a debugging banner. **Disable image input** or disconnect stops use but does not revoke that required permission. Rebuild/reload the default text extension or uninstall to remove it. Disabled image requests fail before submission.
+
+Image interpretation uses Copilot's built-in attachment/vision capability. It does not automatically run local OCR or an external vision service; restrictions on all visual analysis can prevent viewing. Attachment verification does not certify the answer or identify Copilot's internal vision model.
+
+This UI transport supports text and base64 image attachments with buffered responses, local token estimates and no measured provider billing. UI changes, account limits, policy refusals and malformed replies can interrupt tasks. PNG/JPEG/GIF/WebP images from native Read or user messages are sent as actual Copilot attachments, with stable references in text history. Limits are 5 MB per image, 10 MB of unique image data in a request and five attachments per browser turn. Remote image URLs, audio, video, signed thinking, exact API caching and arbitrary long-running/subagent flows are not supported or guaranteed. See [limitations](docs/public/limitations.md).
 
 ```powershell
 npm.cmd run typecheck
