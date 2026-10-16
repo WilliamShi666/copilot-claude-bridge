@@ -345,8 +345,8 @@
     },
     {
       "path": "tests/agent-gateway.test.ts",
-      "bytes": 9045,
-      "sha256": "7e69ad099a8606a183aad6c564c881d1e555dbd790f3df7c6f6fb56f201b604c"
+      "bytes": 10281,
+      "sha256": "f095a4d03177d26c9d799ca7ca26e72d62b2ca6f7e1509bb8459371c6438bec4"
     },
     {
       "path": "tests/auxiliary-tabs.test.ts",
