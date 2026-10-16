@@ -4,6 +4,7 @@ import {TransportFailure,refusalKind,type CancelReceipt} from '../protocol/cance
 import type {ContextPacket} from '../protocol/transfer.js';
 import type {BrowserImage} from '../protocol/images.js';
 import {runSummaryChain,providerRestriction,type SummaryAttempt} from '../protocol/summary.js';
+import {ImageInputFailure} from './image-input.js';
 export interface BrowserJob { id: string; modelLabel: string; prompt: string; conversation?:ConversationCommand;contextPackets?:ContextPacket[];summary?:boolean;cancelContinuation?:1;lane?:BrowserLane;isolatedRecovery?:boolean;images?:BrowserImage[] }
 export interface TurnObservation {pageInstance:string;prepared:boolean;beforeEvidence?:string;baseUsers:number;baseAssistants:number;wirePrompt:string;sendClicked:boolean;sentPackets:number;inputComplete:boolean;stableEvidence?:string;stableSince?:number;finished:boolean;stopRequested?:boolean}
 const instances=new WeakMap<Document,string>();
@@ -80,7 +81,9 @@ export function imageDraftPreviewsReady(doc:Document,images:BrowserImage[]){
  // Freeze the submitted draft only after every owned reference is present;
  // otherwise that delayed filename looks like a human edit at input proof.
  const references=[...editor!.querySelectorAll('[data-lexical-decorator="true"][contenteditable="false"] [data-entity-type="File"]')].map(reference=>reference.textContent??'');
- if(references.length!==images.length||images.some((image,index)=>references[index]!==image.name))return false;
+ // Office can append File entities in upload-completion order. Filenames bind
+ // the pixel identity, so require the exact unique set, not a visual ordering.
+ if(references.length!==images.length||new Set(references).size!==images.length||images.some(image=>!references.includes(image.name)))return false;
  const names=imageDraftNames(doc),previews=[...composer.querySelectorAll<HTMLImageElement>('button img[alt]')];
  return images.every(image=>names.includes(image.name)&&previews.some(preview=>preview.alt===image.name&&preview.complete&&preview.naturalWidth>0&&!!preview.getAttribute('src')));
 }
@@ -302,7 +305,7 @@ export async function exchange(doc:Document,job:BrowserJob,signal:AbortSignal,be
   await until(doc,()=>!button(doc,/^(停止生成|Stop generating)/i),signal);
   const draft=draftText(doc);
   if(draft){if(lastPrompt===undefined||draft!==normalize(lastPrompt.replace(/\r?\n/g,' ')))throw new Error('A draft changed during summary fallback; it was not overwritten');await fill(doc,'',signal);}
- },signal,onAttempt);
+ },signal,onAttempt,error=>!(error instanceof ImageInputFailure));
  onSummary(result.model,result.attempts);return result.text;
 }
 async function exchangeAttempt(doc: Document, job: BrowserJob, signal: AbortSignal, beforeSend: () => Promise<void>,onPrompt:(prompt:string)=>void=()=>{},turn?:TurnObservation,submitImage?:(modelLabel:string)=>Promise<void>): Promise<string> {

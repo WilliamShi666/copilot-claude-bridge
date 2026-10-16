@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Apply image-input focus emulation to nested Office iframe targets, and distinguish proven pre-Enter failures from unknown delivery without discarding native context or image-summary evidence.
+- Accept reordered inline attachment references only when their unique filename set exactly matches the expected images; permit one explicit same-chat format correction for commentary preceding a validated structured suffix.
+
 - Correct one syntactically malformed native JSON reply in its verified original Copilot chat, without replaying client history, executing the rejected tools or changing models.
 
 - Remove lifetime count caps from conversation, native-context and compaction registries, including restart loading, while preserving all existing state.

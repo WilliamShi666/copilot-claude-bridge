@@ -13,7 +13,7 @@ export function validateSummary(text:string){
  let reply:any;try{reply=JSON.parse(text.trim().replace(/^```(?:json)?\s*([\s\S]*?)\s*```$/,'$1'));}catch{throw new Error('Summary response is not valid JSON');}
  if(!reply||Object.keys(reply).join(',')!=='content'||!Array.isArray(reply.content)||!reply.content.length||!reply.content.every((b:any)=>b?.type==='text'&&typeof b.text==='string'&&b.text.trim()&&Object.keys(b).sort().join(',')==='text,type'))throw new Error('Summary must contain nonempty text only; tools were not forwarded');
 }
-export async function runSummaryChain(run:(model:string)=>Promise<string>,recover:()=>Promise<void>,signal:AbortSignal,onAttempt:(attempt:SummaryAttempt)=>void=()=>{}){
+export async function runSummaryChain(run:(model:string)=>Promise<string>,recover:()=>Promise<void>,signal:AbortSignal,onAttempt:(attempt:SummaryAttempt)=>void=()=>{},retryable:(error:unknown)=>boolean=()=>true){
  const attempts:SummaryAttempt[]=[];
  for(const [index,model]of SUMMARY_MODELS.entries()){
   signal.throwIfAborted();
@@ -21,7 +21,7 @@ export async function runSummaryChain(run:(model:string)=>Promise<string>,recove
   catch(error){
    const message=error instanceof Error?error.message:'Summary inference failed';const attempt={model,error:message.slice(0,500)};attempts.push(attempt);onAttempt(attempt);
    signal.throwIfAborted();
-   if(providerRestriction(message)||/draft|already generating|changed|altered|truncated|Invalid segmented/i.test(message))throw error;
+   if(!retryable(error)||providerRestriction(message)||/draft|already generating|changed|altered|truncated|Invalid segmented/i.test(message))throw error;
    if(index===SUMMARY_MODELS.length-1)throw new Error('Summary models failed: '+attempts.map(a=>a.model+': '+a.error).join('; '));
    await recover();
   }

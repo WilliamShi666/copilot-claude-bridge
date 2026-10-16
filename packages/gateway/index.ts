@@ -12,7 +12,7 @@ import {DirectSessions,validSession,validAgent,type DirectFrame} from './direct-
 import {renderContextPrompt,estimateTokens,planContext} from '../protocol/context.js';
 import {contextPackets as segmentContext,type ContextPacket} from '../protocol/transfer.js';
 
-import {SUMMARY_MODELS,isSummaryRequest,validateSummary,type SummaryAttempt} from '../protocol/summary.js';
+import {SUMMARY_MODELS,isSummaryRequest,validateSummary,providerRestriction,type SummaryAttempt} from '../protocol/summary.js';
 import {compactionPrompt,summaryPackets,assertCompactionSummary} from './summary-prompt.js';
 
 interface Options { stateDir: string; port?: number; timeoutMs?: number; queueTimeoutMs?:number;cancelTimeoutMs?:number; maxPromptChars?: number; backend?:'chrome'|'excel-desktop';selectedWindow?:number;onClose?:()=>void }
@@ -132,10 +132,21 @@ export async function startGateway(options: Options) {
       jobs.set(oldId,{...job,phase:'failed',finished:new Date().toISOString(),error:'Malformed JSON; one same-chat format correction queued',request:{model:job.request.model,max_tokens:1,messages:[]},prompt:'',images:undefined,imagePayloads:undefined,contextPackets:undefined,directFrame:undefined,deliveryFrame:undefined});
       if(active?.id===oldId)active=undefined;
       Object.assign(job,{id:nextId,directFrame:frame,conversation,conversationReceipt:undefined,phase:'queued',submitted:undefined,workerDispatched:false,dispatchWorker:undefined,formatAttempt:1,resultSettling:false,images:undefined,contextPackets:undefined,isolatedRecovery:false,contextKind:'format-correction',contextReason:'malformed-json'});
-      job.prompt='Your previous reply could not be parsed as valid JSON and was NOT delivered to the client. None of its proposed tool calls was executed. Correct only that reply\'s JSON serialization; preserve its intended text and tool arguments. Do not repeat previously completed local tools or invent tool results. Do not restart the task, change models or edit the workbook. '+REPLY_CONTRACT;
+      job.prompt='Your previous reply could not be parsed as valid JSON and was NOT delivered to the client. None of its proposed tool calls was executed. Correct only that reply\'s JSON serialization; preserve its intended text and tool arguments. Preserve any refusal as text; never reverse it into a tool request. Do not repeat previously completed local tools or invent tool results. Do not restart the task, change models or edit the workbook. '+REPLY_CONTRACT;
       job.promptChars=job.prompt.length;job.packetCount=1;jobs.set(nextId,job);job.timer=setTimeout(()=>expire(job),options.queueTimeoutMs??900000);await persist();return true;
     }catch(error){finish(job,error instanceof BridgeError?error:new BridgeError(error instanceof Error?error.message:'Could not prepare reply correction',502,'api_error'));return true;}
     finally{job.transition=false;if(job.cancelRequested){job.cancelRequested=false;beginClientCancel(job);}void dispatch();}
+  }
+  function correctableReply(text:string,request:MessagesRequest){
+    if(providerRestriction(text))return false;
+    if(/^(?:```(?:json)?\s*\{|\{\s*"content"\s*:)/.test(text.trim()))return true;
+    // The DOM renderer can flatten a code block after leading commentary.
+    // Validate one complete structured suffix only to permit a same-chat
+    // correction. Never extract/execute that suffix as the native response.
+    const candidates=[...text.matchAll(/(?:^|\n)[ \t]*(\{\s*"content"\s*:)/g)];
+    if(candidates.length!==1)return false;
+    const match=candidates[0],offset=match.index!+match[0].indexOf('{');
+    try{parseReply(text.slice(offset),request);return true;}catch{return false;}
   }
   async function fallbackOnce(job:Job,cause:string){
     if(job.transition)return true;
@@ -308,12 +319,14 @@ export async function startGateway(options: Options) {
             // Keep cancellation independent so it can still claim this job.
             if(job.resultSettling)return;job.resultSettling=true;
             if (typeof value.text !== 'string') throw new Error('Missing reply text');
+            const restriction=providerRestriction(value.text);
+            if(restriction){if(job.directFrame)await direct.terminalFailure(job.directFrame,restriction);finish(job,new BridgeError(restriction,400,'invalid_request_error'));send({type:'ack',id:value.id});return;}
             if(job.images?.length&&(!Array.isArray(value.imageIds)||value.imageIds.length!==job.images.length||job.images.some((image,index)=>value.imageIds[index]!==image.id)))throw new Error('Browser did not verify actual image attachment delivery; the reply was not returned');
             if(job.summary){validateSummary(value.text);assertCompactionSummary(value.text);}
             // Count a success only after validating the actual upstream response.
             if (job.kind === 'messages') {
               try{parseReply(value.text,job.request);}catch(error){
-                if(error instanceof ReplyFormatError&&/^(?:```(?:json)?\s*\{|\{\s*"content"\s*:)/.test(value.text.trim())&&await correctFormatOnce(job,value.conversation)){send({type:'ack',id:value.id});return;}
+                if(error instanceof ReplyFormatError&&correctableReply(value.text,job.request)&&await correctFormatOnce(job,value.conversation)){send({type:'ack',id:value.id});return;}
                 throw error;
               }
             }
