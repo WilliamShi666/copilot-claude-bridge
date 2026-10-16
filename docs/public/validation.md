@@ -48,6 +48,12 @@ After reloading the built extension, Windows Chrome was paired to the existing U
 
 The real Chrome popup then switched from WSL to the previously paired Windows gateway and back to WSL with an empty pairing-code field. Both gateways became ready on their respective selected main workbook tabs; no new pairing code was supplied. The final WSL launcher readiness check passed. One extension still connects to only one gateway at a time; startup does not automatically select the destination in Chrome.
 
+## Paired main tab closed before the first request
+
+The closed-main startup repair passes 268 runtime tests, six launcher checks and two source-export checks on Windows Node 24 and Ubuntu WSL Node 22. A regression reproduces an auxiliary title completing while the first native main request waits behind ready=false. Removing the new first-main dispatch predicate makes that regression fail at its dispatch deadline. Tests also cover a transient pane recovering without a rebuild, exactly one isolated recovery across max_tokens retries, refusal/unknown-delivery non-retry rules and matching prompt/registry epoch 1.
+
+Real interactive Claude Code 2.1.296 on Windows and 2.1.300 on WSL were started in the regular project directory with Auto Mode. The paired bridge test tab was then closed before the first prompt. Each client automatically created one recovery workbook, displayed the full-sync notice, executed Write once and Read once, and produced the exact independently read disk marker. The first successful bootstrap contained 189,692 characters on Windows and 316,958 on WSL; subsequent native tool results used deltas in that same recovery conversation at epoch 1. No manual browser resubmission or saved provider/permission changes were used. The unrelated original workbook tab was left open. This validates tab loss after client startup; initial login and pairing requirements remain.
+
 ## Split-pane Agent Teams
 
 A separate Ubuntu WSL / tmux check launched one lead and three native teammate processes. All three initial teammate replies returned, but the lead received repeated context 409 errors. Separate-process requests omitted the agent identity used by the bridge and were routed as main conversations, changing the lead browser chat. This mode did not pass; the launcher defaults to in-process teammates.
