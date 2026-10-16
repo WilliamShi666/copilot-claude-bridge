@@ -51,3 +51,7 @@ Provider refusals are terminal and preserve their original error across retries/
 Install matching gateway/extension builds, reload the extension and refresh the workbook; `capabilities.cancelContinuation` must be `1`. Same chat identity, unchanged epoch and smaller transmitted deltas are observable continuity evidence, not proof of provider-side cache hits.
 
 The launcher lists only the supported Opus/Sonnet 5.5 native IDs and their Copilot deployment IDs in session-only `availableModels`. This keeps native model selection and Auto-mode classifier routing within the gateway model set. The native classifier remains responsible for each permission decision. Saved global provider/permission settings are not edited.
+
+## Lifetime registry retention
+
+Conversation handles, native session/agent/model contexts and compaction scopes have no fixed lifetime registration-count limit. New entries and restart loading use the same per-record validation, without the old 100-entry ceiling. Existing records are retained rather than evicted, preserving ready chats, uncertain-delivery checkpoints, terminal refusal reasons and running compactions. The limits on request size, active browser work and native context windows are separate; removing a lifetime record cap does not change those controls or Copilot service quotas.
