@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Recover a closed paired main tab on the first native request instead of leaving Claude Code waiting after an auxiliary title reply.
+
 - Forward base64 images from native Read/user messages as verified Copilot attachments, preserving stable image references and allowing subsequent feedback to continue without repeating image uploads.
 - Confirm native cancellation and continue verified original chats with recovery deltas; discard cancelled tool calls and preserve actual native tool results.
 - Rebuild an unavailable chat at most once per feedback in an isolated tab, preserving drafts and reporting full synchronization.

@@ -130,6 +130,7 @@ node dist/packages/cli/index.js stop
 | --- | --- |
 | `fetch failed` | 旧的直接 `run` 命令要求网关已经运行。先用启动入口 `--check`；如果仍失败，查看目标环境的网关日志、端口和 `doctor` 输出。 |
 | `extension is not connected` | 网关已运行，但 Chrome 未连接。尤其检查 Windows `59173` 与 WSL `59175` 是否选错。启动 WSL 不会自动改变扩展目标。 |
+| Copilot 只返回会话标题，Claude Code 一直等待 | 标题使用独立辅助页，不能证明主聊天可用。原生客户端已启动后若配对主标签页被关闭，新会话首轮会检查原页面，并在确认未发送且页面不可用时最多创建一次恢复页，显示完整同步提示。若启动前就未就绪，打开工作簿与 Copilot，再点 **Use selected Excel tab**。 |
 | `Copilot is not ready` | 打开所配对工作簿、登录、Copilot Chat，清除未发送草稿并等生成结束，再 **Use selected Excel tab**。 |
 | `no saved pairing` 或旧凭据被拒绝 | 在目标环境执行 `setup`，需要新配对码时先确保空闲再停止并重启目标网关，再进行一次配对。不要把另一端的码拿来用。 |
 | `Bridge is not built` / `MODULE_NOT_FOUND` | 在仓库根目录执行 `npm ci` 与 `npm run build`；不要将旧机器的绝对路径照搬。PowerShell 使用 `npm.cmd`。 |
