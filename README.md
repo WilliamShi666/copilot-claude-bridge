@@ -81,6 +81,8 @@ WSL 仓库内使用 `bash ./start-copilot.sh /mnt/d/my-project`。Windows 默认
 
 **上游拒绝：** 明确的 Copilot 拒绝单独显示，且不通过换聊天、换模型或自动重试恢复。仅改变 `max_tokens` 的重试保留原错误。`context-reset` 不能解决服务拒绝。
 
+**回复 JSON 出错：** 新网关对已完成且可核实原聊天的 JSON 语法错误，最多在同一聊天、同一模型内请求纠正一次。不会重新发送完整历史，也不会执行错误回复中的工具；纠正后仍须通过工具参数校验。成功时显示桥接器纠正提示；明确拒绝、未知投递、参数违规或再次格式失败仍停止。
+
 **仍出现 409：** 对于没有取消回执、也没有可验证中断检查点的旧记录，或其他未知投递状态，先检查本地工具是否已执行，再按错误中显示的原生 session ID 显式恢复。不要原样重复提交不确定的请求。
 
 网关和扩展需要成套更新：构建后重载扩展、刷新配对工作簿，`doctor` 应显示 `capabilities.cancelContinuation: 1`。原有启动命令不变。
@@ -89,7 +91,7 @@ WSL 仓库内使用 `bash ./start-copilot.sh /mnt/d/my-project`。Windows 默认
 node dist/packages/cli/index.js context-reset --session <native-session-id>
 ```
 
-检查磁盘上是否已经有工具执行的结果，再从 Claude Code 重试。重置不会撤销已执行的操作；网关不会自动重发不确定请求。
+在与当前网关相同的 Windows 或 WSL 终端、仓库根目录执行这条命令，不是在 Claude Code 对话框里输入，也不需要前缀 `claude-copilot`。检查磁盘上是否已经有工具执行的结果，再从 Claude Code 重试。重置不会撤销已执行的操作；网关不会自动重发不确定请求。
 
 如果错误属于子代理，使用错误中提供的 `--agent <agent-id>` 参数，仅重置该代理：`context-reset --session <native-session-id> --agent <agent-id>`。
 

@@ -69,11 +69,14 @@ export function buildPrompt(request: MessagesRequest, limit = 180000): string {
   if (prompt.length > limit) throw new BridgeError(`Request is ${prompt.length} characters; configured Copilot UI limit is ${limit}. Nothing was truncated.`, 413);
   return prompt;
 }
+export class ReplyFormatError extends BridgeError {
+  constructor(){super('Copilot did not return the required JSON. Its response was not converted into fabricated tool calls.',502,'api_error');}
+}
 export function parseReply(text: string, request: MessagesRequest): Reply {
   const clean = text.trim().replace(/^Copilot said:\s*/, '').trim().replace(/^```(?:json)?\s*([\s\S]*?)\s*```$/, '$1');
   if (clean.length > 500000) throw new BridgeError('Copilot response exceeds size limit', 502, 'api_error');
   let value: unknown;
-  try { value = JSON.parse(clean); } catch { throw new BridgeError('Copilot did not return the required JSON. Its response was not converted into fabricated tool calls.', 502, 'api_error'); }
+  try { value = JSON.parse(clean); } catch { throw new ReplyFormatError(); }
   if (!object(value) || Object.keys(value).join(',') !== 'content' || !Array.isArray(value.content) || !value.content.length || value.content.length > 64) throw new BridgeError('Invalid Copilot response envelope', 502, 'api_error');
   const schemas = new Map((request.tools ?? []).map(t => [t.name, t.input_schema]));
   const content = value.content.map(block => {

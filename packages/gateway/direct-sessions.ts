@@ -85,6 +85,13 @@ export class DirectSessions {
  }
  async terminalFailure(frame:DirectFrame,message:string){const record=this.records.get(frame.key);if(!record||record.jobId!==frame.jobId)return;record.state='uncertain';record.failure={identity:frame.identity,code:'provider_refusal',message:message.slice(0,1000)};delete record.interruption;delete record.resume;delete record.jobId;await this.persist();}
  async markRebuild(frame:DirectFrame){const record=this.records.get(frame.key);if(!record||record.state!=='busy'||record.jobId!==frame.jobId)throw new BridgeError('Recovery lease changed',409);if(record.rebuildIdentity===frame.identity)throw new BridgeError('Automatic recovery was already attempted for this feedback',400,'invalid_request_error');record.rebuildIdentity=frame.identity;await this.persist();}
+ async correctFormat(frame:DirectFrame,jobId:string,conversationId:string):Promise<DirectFrame>{
+  const record=this.records.get(frame.key);if(!record||record.state!=='busy'||record.jobId!==frame.jobId)throw new BridgeError('Reply correction lease changed',409);
+  record.jobId=jobId;record.epoch=frame.epoch;await this.persist();
+  // Original input reached this verified chat; malformed tools never reached
+  // the client. An unsent correction can still retain that input on cancel.
+  return{...frame,jobId,recoveryCheckpoint:frame.feedback,resumeBackup:{snapshot:frame.plan.snapshot,conversationId,cancelledJobId:frame.jobId}};
+ }
  async restoreLegacyFailure(sessionId:string,model:string,agentId:string|undefined,message:string){for(const record of this.records.values())if(record.sessionId===sessionId&&record.model===model&&record.agentId===agentId&&record.state==='uncertain'&&!record.failure){record.failure={identity:'0'.repeat(64),code:'provider_refusal',message};delete record.interruption;delete record.resume;}await this.persist();}
  async fallback(frame:DirectFrame,request:MessagesRequest,jobId:string):Promise<DirectFrame>{const record=this.records.get(frame.key);if(!record||record.jobId!==frame.jobId)throw new BridgeError('Recovery lease changed',409);record.jobId=jobId;record.resetReason='original-chat-unavailable';await this.persist();return{...frame,jobId,plan:planContext(request,record.snapshot,'original-chat-unavailable'),epoch:record.epoch+1,conversationId:undefined,isolatedRecovery:true,recoveryReason:'original-chat-unavailable',resumeBackup:undefined};}
  async compact(sessionId:string,workspaceKey:string|undefined,event:'PreCompact'|'PostCompact',trigger:string,agentId?:string){
