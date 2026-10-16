@@ -3,7 +3,8 @@ import {validBrowserLane,type BrowserLane,type ConversationReceipt} from '../pro
 import {AuxiliaryTabs,type AuxiliaryBinding} from './auxiliary-tabs.js';
 import type {CancelReceipt} from '../protocol/cancellation.js';
 import {TransportFailure} from '../protocol/cancellation.js';
-import {ImageInput} from './image-input.js';
+import {ImageInput,ImageInputFailure} from './image-input.js';
+import {ImageFocus} from './image-focus.js';
 import {SUMMARY_MODELS} from '../protocol/summary.js';
 interface Config { url: string; token: string; workerId: string; tabId: number;workbookUrl?:string;documentKey?:string; frameId?: number; ready?: boolean;conversationControl?:boolean;cancelContinuation?:boolean;imageInput?:boolean;auxiliary?:AuxiliaryBinding;recovery?:AuxiliaryBinding;agents?:Record<string,AuxiliaryBinding> }
 type InternalLane=BrowserLane|'recovery';
@@ -33,9 +34,13 @@ async function changeConnection(action:()=>Promise<void>){
   try{await action();}finally{switching=false;await connect();announceReady();await uiStatus();}
 }
 async function uiStatus(error?: string) { await chrome.storage.local.set({ status: { connected: socket?.readyState === WebSocket.OPEN, ready: config?.ready === true&&!busyLane,busy:!!busyLane||imageInput.busy, tabId: config?.tabId, frameId: config?.frameId,sessionSyncVersion:1,auxiliaryTabId:config?.auxiliary?.tabId, error: error ?? null, updated: Date.now() } }); }
+const imageFocus=new Map<number,ImageFocus>();
 const imageInput=new ImageInput({
  attach:async tabId=>{await chrome.debugger.attach({tabId},'1.3');},
- focus:async(tabId,enabled)=>{await chrome.debugger.sendCommand({tabId},'Emulation.setFocusEmulationEnabled',{enabled});},
+ focus:async(tabId,enabled)=>{
+  if(enabled){const scope=new ImageFocus({command:(target,method,params)=>chrome.debugger.sendCommand(target,method,params),listen:callback=>{const listener=(source:chrome.debugger.DebuggerSession,method:string,params?:object)=>{if(typeof source.tabId==='number')callback({tabId:source.tabId,sessionId:source.sessionId},method,params);};chrome.debugger.onEvent.addListener(listener);return()=>chrome.debugger.onEvent.removeListener(listener);}},tabId);imageFocus.set(tabId,scope);await scope.enable();}
+  else{const scope=imageFocus.get(tabId);try{await scope?.disable();}finally{imageFocus.delete(tabId);}}
+ },
  enter:async(tabId,type)=>{
   const key={key:'Enter',code:'Enter',windowsVirtualKeyCode:13,modifiers:0,location:0,isKeypad:false};
   await chrome.debugger.sendCommand({tabId},'Input.dispatchKeyEvent',{...key,type,...(type==='keyDown'?{text:'\r',unmodifiedText:'\r',autoRepeat:false,commands:[]}:{})});
@@ -109,7 +114,7 @@ async function frameMessage(value: any) {
 }
 async function sendFrame(value:any,tabId:number,frameId:number|undefined){
  if(value.type==='job'){
-  if(value.images?.length){if(!imageEnabled||!await chrome.permissions.contains({permissions:['debugger']}))throw Object.assign(new Error('Enable optional image input in the bridge popup before sending images'),{submitted:false});const imageState=await chrome.tabs.sendMessage(tabId,{type:'inspect'},{frameId}).catch(()=>undefined);if(imageState?.imageInput!==1||imageState?.trustedImageInput!==9)throw Object.assign(new Error('Refresh this workbook to enable image attachments'),{submitted:false});}
+  if(value.images?.length){if(!imageEnabled||!await chrome.permissions.contains({permissions:['debugger']}))throw Object.assign(new Error('Enable optional image input in the bridge popup before sending images'),{submitted:false});const imageState=await chrome.tabs.sendMessage(tabId,{type:'inspect'},{frameId}).catch(()=>undefined);if(imageState?.imageInput!==1||imageState?.trustedImageInput!==10)throw Object.assign(new Error('Refresh this workbook to enable image attachments'),{submitted:false});}
   if(value.cancelContinuation===1){const state=await chrome.tabs.sendMessage(tabId,{type:'inspect'},{frameId}).catch(()=>{throw Object.assign(new TransportFailure('Original Copilot frame is unavailable','conversation_unavailable'),{submitted:false});});if(state?.cancelContinuation!==1)throw Object.assign(new Error('Refresh this workbook to enable cancellation continuation'),{submitted:false});}
   const binding={tabId,frameId,delivered:false,imageInput:!!value.images?.length,summary:value.summary===true,modelLabel:value.modelLabel};jobBindings.set(value.id,binding);await chrome.storage.local.set({['binding:'+value.id]:binding});
   const stored=(await chrome.storage.local.get('bindingOrder')).bindingOrder;const order=Array.isArray(stored)?stored.filter((id:any)=>typeof id==='string'&&id!==value.id):[];order.push(value.id);for(const old of order.splice(0,Math.max(0,order.length-100))){jobBindings.delete(old);await chrome.storage.local.remove('binding:'+old);}await chrome.storage.local.set({bindingOrder:order});
@@ -193,7 +198,7 @@ async function connect() {
     ws.onopen = async () => {
       if(socket!==ws)return;
       const captured=config!;
-      try { const checked = await frameMessage({ type: 'inspect' });if(socket!==ws||config!==captured)return;captured.ready = checked.ready === true;captured.cancelContinuation=checked.cancelContinuation===1;captured.imageInput=checked.imageInput===1&&checked.trustedImageInput===9;captured.conversationControl=checked.conversationControl===true&&checked.conversationResumability==='active-chat-only'; } catch {if(socket!==ws||config!==captured)return;captured.ready = false;captured.conversationControl=false; }
+      try { const checked = await frameMessage({ type: 'inspect' });if(socket!==ws||config!==captured)return;captured.ready = checked.ready === true;captured.cancelContinuation=checked.cancelContinuation===1;captured.imageInput=checked.imageInput===1&&checked.trustedImageInput===10;captured.conversationControl=checked.conversationControl===true&&checked.conversationResumability==='active-chat-only'; } catch {if(socket!==ws||config!==captured)return;captured.ready = false;captured.conversationControl=false; }
       if(socket!==ws)return;
       send({ type: 'hello', token: config!.token, workerId: config!.workerId, ready: config!.ready,conversationControl:config!.conversationControl,conversationResumability:'active-chat-only',sessionSyncVersion:1,auxiliaryLanes:true,auxiliaryBootstrap:1,contextPackets:1,summaryRouting:1,agentContexts:1,cancelContinuation:config!.cancelContinuation?1:0,imageInput:config!.imageInput&&imagePermission&&imageEnabled?1:0 }); await uiStatus();
     };
@@ -258,10 +263,11 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
           if(proof?.ready!==true||afterInput&&proof.submitted!==true||canceledJobs.has(message.id)||busyLane?.id!==message.id)throw new Error(proof?.error??'Image input page, draft or job changed before submission');
           return afterInput&&proof.submitted===true;
         };
-        await verify();await imageInput.submit(message.id+':image:'+message.attempt,binding!.tabId,verify);respond({submitted:true});return;
+        try{await imageInput.submit(message.id+':image:'+message.attempt,binding!.tabId,verify);respond({submitted:true});}
+        catch(error){respond({error:error instanceof Error?error.message:'Image input failed',inputAttempted:error instanceof ImageInputFailure?error.inputAttempted:true});}return;
       }
       if (message.type === 'frame-ready') {
-        if(lane==='main'){config.frameId = sender.frameId; config.ready = message.ready === true;config.cancelContinuation=message.cancelContinuation===1;config.imageInput=message.imageInput===1&&message.trustedImageInput===9;if(sender.tab.url?.startsWith('https://excel.cloud.microsoft/open/'))config.workbookUrl=sender.tab.url;config.conversationControl=message.conversationControl===true&&message.conversationResumability==='active-chat-only';await save();}
+        if(lane==='main'){config.frameId = sender.frameId; config.ready = message.ready === true;config.cancelContinuation=message.cancelContinuation===1;config.imageInput=message.imageInput===1&&message.trustedImageInput===10;if(sender.tab.url?.startsWith('https://excel.cloud.microsoft/open/'))config.workbookUrl=sender.tab.url;config.conversationControl=message.conversationControl===true&&message.conversationResumability==='active-chat-only';await save();}
         else await ownedManager(lane).observe(sender.tab.id!,sender.frameId,sender.url,message.ready===true);
         if(busyLane?.lane===lane&&message.ready===true&&settledJobs.has(busyLane.id)){settledJobs.delete(busyLane.id);busyLane=undefined;}
         announceReady();await connect();await uiStatus();

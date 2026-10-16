@@ -1,11 +1,11 @@
 import { exchange, captureConversation, verifyImageDelivery,focusImageSubmission,imageSendTarget,imageSubmissionDiagnostics,confirmImageSubmission,input, inspect, stop,observeTurn,stopOwnedTurn,cancellationProof, type BrowserJob,type TurnObservation } from './adapter.js';
-import {trustedEnterObservation} from './image-input.js';
+import {trustedEnterObservation,ImageInputFailure} from './image-input.js';
 import {TransportFailure,refusalKind,type RefusalKind,type CancelReceipt,type FailureCode} from '../protocol/cancellation.js';
 import type { ConversationReceipt } from '../protocol/conversation.js';
 import {SUMMARY_MODELS,type SummaryAttempt} from '../protocol/summary.js';
 interface Entry { id: string; phase: 'preparing' | 'submitted' | 'done' | 'failed'; text?: string; error?: string;code?:FailureCode; submitted?:boolean; updated: number; conversation?:ConversationReceipt;imageIds?:string[];summaryModel?:string;summaryAttempts?:SummaryAttempt[] }
 // Reinjection must not register a second listener or submit a request twice.
-const capabilities={contextPackets:1,summaryRouting:1,cancelContinuation:1,imageInput:1,trustedImageInput:9} as const;
+const capabilities={contextPackets:1,summaryRouting:1,cancelContinuation:1,imageInput:1,trustedImageInput:10} as const;
 const root = globalThis as typeof globalThis & { __m365BridgeInstalled?: boolean };
 if (!root.__m365BridgeInstalled && /^https:\/\/[^/]+\.officeapps\.live\.com\//.test(location.href)) {
   root.__m365BridgeInstalled = true;
@@ -27,7 +27,7 @@ if (!root.__m365BridgeInstalled && /^https:\/\/[^/]+\.officeapps\.live\.com\//.t
         controller.signal.throwIfAborted();running.imageNonce=crypto.randomUUID();running.imageModel=modelLabel;running.imageAttempt=job.summary?SUMMARY_MODELS.findIndex(model=>model===modelLabel)+1:1;
         const editor=input(document),target=imageSendTarget(document);if(!editor||!target)throw new Error('Image editor or native Send button disappeared before trusted input');running.imageEditor=editor;running.imageTarget=target;running.imageObservation?.dispose();const observed=trustedEnterObservation(target,controller.signal);running.imageObservation=observed;
         try{const response=await chrome.runtime.sendMessage({type:'image-submit',id:job.id,nonce:running.imageNonce,modelLabel,attempt:running.imageAttempt,pageInstance:running.turn?.pageInstance});
-          if(response?.submitted!==true)throw new Error(response?.error??'Trusted image input was not confirmed');
+          if(response?.submitted!==true)throw new ImageInputFailure(response?.error??'Trusted image input was not confirmed',response?.inputAttempted!==false);
           observed.arm();if(!await observed.promise)throw new Error('Trusted Enter did not reach the verified Copilot Send button; input was not repeated');
         }finally{observed.dispose();delete running.imageEditor;delete running.imageTarget;}
       });
@@ -39,6 +39,13 @@ if (!root.__m365BridgeInstalled && /^https:\/\/[^/]+\.officeapps\.live\.com\//.t
       if(!running.cancelled)await chrome.runtime.sendMessage({ type: 'result', id: job.id, text,conversation,imageIds,summaryModel,summaryAttempts });
     } catch (err) {
       if(running.imageObservation)controller.abort();
+      if(err instanceof ImageInputFailure&&!err.inputAttempted&&running.turn){
+        // The driver proves it never invoked keyDown. The write-ahead journal
+        // remains conservative on a crash, but this completed failure is not
+        // proof of delivery. Prior long-context packets still count as sent.
+        running.turn.sendClicked=false;running.turn.sentPackets=Math.max(0,running.turn.sentPackets-1);running.turn.inputComplete=false;
+        submitted=running.turn.sentPackets>0;running.submitted=submitted;
+      }
       if(submitted){if(running.turn)stopOwnedTurn(document,running.turn);else stop(document);}const baseError=err instanceof Error ? err.message : 'Browser error',trace=running.imageObservation?.trace()??[],error=baseError+(trace.length?' [image Enter events: '+JSON.stringify(trace)+']':''),code=err instanceof TransportFailure?err.code:undefined;running.failureCode=code;if(code==='provider_refusal')running.failureKind=refusalKind(baseError);
       await save({ id: job.id, phase: 'failed', error,code,submitted, updated: Date.now(),summaryModel,summaryAttempts });
       if(!running.cancelled||code==='provider_refusal')await chrome.runtime.sendMessage({ type: 'failure', id: job.id, error,code,submitted,summaryModel,summaryAttempts });

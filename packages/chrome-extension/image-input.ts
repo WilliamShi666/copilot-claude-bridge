@@ -5,6 +5,9 @@ export interface ImageInputDriver {
  enter(tabId:number,type:'keyDown'|'keyUp'):Promise<void>;
  detach(tabId:number):Promise<void>;
 }
+export class ImageInputFailure extends Error {
+ constructor(message:string,readonly inputAttempted:boolean){super(message);}
+}
 export function trustedEnterObservation(target:HTMLElement,signal:AbortSignal,timeout=3000){
  let resolve!:(value:boolean)=>void,done=false,disposed=false,timer:ReturnType<typeof setTimeout>|undefined;const records:Record<string,unknown>[]=[];
  const promise=new Promise<boolean>(r=>{resolve=r;});
@@ -29,10 +32,10 @@ export class ImageInput {
  constructor(private driver:ImageInputDriver){}
  get busy(){return this.activeTabs.size>0;}
  async submit(id:string,tabId:number,verify:(requirePageFocus?:boolean,afterInput?:boolean)=>Promise<boolean|void>){
-  if(this.attempted.has(id))throw new Error('Image submission was already attempted; it was not repeated');
-  if(this.activeTabs.has(tabId))throw new Error('Image input is still releasing this tab');
+  if(this.attempted.has(id))throw new ImageInputFailure('Image submission was already attempted; it was not repeated',true);
+  if(this.activeTabs.has(tabId))throw new ImageInputFailure('Image input is still releasing this tab',false);
   this.attempted.add(id);if(this.attempted.size>1000)this.attempted.delete(this.attempted.values().next().value!);this.activeTabs.add(tabId);let attached=false,focusSet=false,pressed=false,keyUpAttempted=false;
-  try{
+  try{try{
    await verify(false);await this.driver.attach(tabId);attached=true;
    // Recheck after attachment: cancellation/navigation may have won that race.
    await verify(false);focusSet=true;await this.driver.focus(tabId,true);
@@ -46,6 +49,6 @@ export class ImageInput {
   }finally{
    try{if(pressed&&!keyUpAttempted)await this.driver.enter(tabId,'keyUp');}
    finally{try{if(focusSet)await this.driver.focus(tabId,false);}finally{try{if(attached)await this.driver.detach(tabId);}finally{this.activeTabs.delete(tabId);}}}
-  }
+  }}catch(error){throw new ImageInputFailure(error instanceof Error?error.message:'Image input failed',pressed);}
  }
 }

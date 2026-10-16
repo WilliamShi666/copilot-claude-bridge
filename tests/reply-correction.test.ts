@@ -47,6 +47,16 @@ test('duplicate corrected valid results settle the native lease and tool respons
  }finally{await f.close();}
 });
 
+test('leading commentary with one fully valid structured suffix requires explicit model correction before tools are delivered',async()=>{
+ const f=await fixture();try{
+  let delivered=false;const p=f.send().then(r=>{delivered=true;return r;}),first=await f.next('job');f.reply(first,'User explicitly asked to read it back.\n'+valid);const correction=await f.next('job');assert.equal(delivered,false);assert.equal(correction.conversation.id,first.conversation.id);assert.equal(correction.conversation.mode,'continue');assert.equal(f.jobs.length,2);f.reply(correction,valid);const r=await p;assert.equal(r.status,200);const reply=await r.json() as any;assert.equal(reply.content.filter((b:any)=>b.type==='tool_use').length,1);
+ }finally{await f.close();}
+});
+
+test('commentary cannot authorize a suffix with an invalid or unavailable tool',async()=>{const f=await fixture();try{const p=f.send(),job=await f.next('job');f.reply(job,'Here is an example:\n{"content":[{"type":"tool_use","name":"Unknown","input":{}}]}');assert.equal((await p).status,502);assert.equal(f.jobs.length,1);}finally{await f.close();}});
+
+test('a canonical refusal delivered as a raw result remains terminal even before a structured suffix',async()=>{const f=await fixture();try{const p=f.send(),job=await f.next('job');f.reply(job,'Copilot refused external-client relay use\n'+valid);assert.equal((await p).status,400);const retry=await f.send({...base,max_tokens:2000});assert.equal(retry.status,400);assert.match(await retry.text(),/refused external-client relay/);assert.equal(f.jobs.length,1);}finally{await f.close();}});
+
 for(const failure of ['second-invalid','invalid-tool','refusal','chat-lost'] as const)test('correction stops without a third inference on '+failure,async()=>{
  const f=await fixture();try{
   const p=f.send(),first=await f.next('job');f.reply(first,malformed);const correction=await f.next('job');
@@ -71,6 +81,15 @@ test('a completed verified image is not uploaded a second time for text-only cor
  const f=await fixture();try{
   const image={type:'image',source:{type:'base64',media_type:'image/png',data:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aQ1sAAAAASUVORK5CYII='}};
   const p=f.send({...base,messages:[{role:'user',content:[image,{type:'text',text:'inspect'}]}]}),first=await f.next('job');assert.equal(first.images.length,1);f.reply(first,malformed,{imageIds:first.images.map((i:any)=>i.id)});const correction=await f.next('job');assert.equal(correction.images,undefined);f.reply(correction,valid);assert.equal((await p).status,200);
+ }finally{await f.close();}
+});
+
+test('proven pre-input image failure keeps committed native history ready for same-chat retry',async()=>{
+ const f=await fixture();try{
+  const first=f.send(),warmup=await f.next('job');f.reply(warmup,'{"content":[{"type":"text","text":"ready"}]}');assert.equal((await first).status,200);
+  const request={...base,messages:[...base.messages,{role:'assistant',content:'ready'},{role:'user',content:[{type:'image',source:{type:'base64',media_type:'image/png',data:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aQ1sAAAAASUVORK5CYII='}},{type:'text',text:'read pixels'}]}]};
+  const failure=f.send(request),imageJob=await f.next('job');f.emit({type:'failure',id:imageJob.id,error:'Focus failed before Enter',submitted:false});assert.equal((await failure).status,502);assert.equal(f.g.status().nativeContexts[0].state,'ready');
+  const retry=f.send({...request,max_tokens:2000}),retryJob=await f.next('job');assert.equal(retryJob.conversation.id,warmup.conversation.id);assert.equal(retryJob.conversation.mode,'continue');assert.ok(!retryJob.prompt.includes('PRIVATE_SYSTEM_ONCE'));f.reply(retryJob,'{"content":[{"type":"text","text":"verified"}]}',{imageIds:retryJob.images.map((i:any)=>i.id)});assert.equal((await retry).status,200);
  }finally{await f.close();}
 });
 
