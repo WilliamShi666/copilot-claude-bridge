@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Correct one syntactically malformed native JSON reply in its verified original Copilot chat, without replaying client history, executing the rejected tools or changing models.
+
 - Remove lifetime count caps from conversation, native-context and compaction registries, including restart loading, while preserving all existing state.
 
 - Recover a closed paired main tab on the first native request instead of leaving Claude Code waiting after an auxiliary title reply.

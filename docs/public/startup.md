@@ -141,7 +141,16 @@ node dist/packages/cli/index.js stop
 | `cancelContinuation` 不为 `1` / matching extension | 网关和扩展成套更新后，重载扩展、刷新配对工作簿，再运行 `doctor`。原有启动命令不变。 |
 | 中断后等待取消确认 | 新反馈最多等待约 15 秒；可核实原聊天就增量续接，否则每次反馈最多在新标签页完整重建一次并提示。 |
 | `Copilot refused ...` | 上游明确拒绝，不自动换模型、换聊天或重试。只改输出长度的重试仍显示原始错误；`context-reset` 不能解决服务拒绝。 |
+| `Copilot did not return the required JSON` | 对于已完成、可核实原聊天且以 JSON/代码块开头的语法错误，新网关会在原聊天同一模型内最多请求纠正一次；不重发任务历史、不执行被拒绝的工具调用。纠正成功会显示提示。无可信回执、参数违规、纯文本回复或再次格式失败仍停止。旧的 409 现场不会自动解锁；按下方命令显式恢复。 |
 | `409 Native context delivery is uncertain` | 旧记录或缺乏可信中断证据时保留保护。检查工具副作用，再按错误中的 session/agent 显式恢复；见 [主页恢复说明](../../README.md#常见问题)。 |
+
+`context-reset` 是桥接器的子命令，在与当前网关相同的 Windows 或 WSL 终端执行；不要填入 Claude Code 的对话框，也不要前缀 `claude-copilot`。在本环境的仓库根目录运行：
+
+```sh
+node dist/packages/cli/index.js context-reset --session <错误中显示的-session-id>
+```
+
+子代理错误同时带有 `--agent` 时，也要照抄该参数。执行前先核对已经写入的文件和运行过的命令。重置不会撤销这些副作用；下一次在原 Claude Code 会话里反馈时会完整同步历史。Windows 与 WSL 的会话记录互不共用，务必在报错的那一端执行。
 
 诊断命令：`node dist/packages/cli/index.js doctor`。后台启动日志位于对应环境的 `~/.m365-claude-bridge/gateway.stdout.log` 和 `gateway.stderr.log`；不要公开上传完整凭据、上下文和私人日志。通过 systemd 启动的既有 WSL 网关查看对应服务日志，而不是新入口的日志文件。
 

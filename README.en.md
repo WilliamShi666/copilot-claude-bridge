@@ -100,6 +100,8 @@ If the original chat is closed, changed, has a new draft, or cannot be verified,
 
 A clear upstream refusal is a separate, nonretryable error. It never triggers another chat or model attempt, and a retry changing only `max_tokens` retains the original reason. `context-reset` does not resolve a provider refusal.
 
+A completed, verified native reply with invalid JSON syntax can get one format-only correction in the same chat and model. The bridge does not replay native history or execute the rejected tools. Corrected output still passes the original tool-schema checks, and successful correction is reported visibly. Refusals, unknown delivery, invalid tool arguments or a second malformed reply stop explicitly. See [context behavior](docs/public/context.md).
+
 Update the gateway and extension together, reload the extension, and refresh the workbook. `doctor` must show `capabilities.cancelContinuation: 1`; launch commands are unchanged.
 
 Older uncertain records without cancellation receipts or a verifiable interruption checkpoint still require explicit recovery. Check actual tool effects before using the native session ID from a **409 Native context delivery is uncertain** error:
@@ -108,7 +110,7 @@ Older uncertain records without cancellation receipts or a verifiable interrupti
 node dist/packages/cli/index.js context-reset --session <native-session-id>
 ```
 
-Retry from Claude Code after checking the actual workspace for any completed tool effects. This resets local context tracking; it cannot undo an already executed tool. Uncertain requests are not automatically replayed.
+Run that command in a separate terminal at the repository root, on the same Windows/WSL side as the failing gateway. It is a bridge CLI subcommand, not a Claude Code prompt or an argument to the optional `claude-copilot` launcher. Retry from Claude Code after checking the actual workspace for any completed tool effects. This resets local context tracking; it cannot undo an already executed tool. Uncertain requests are not automatically replayed.
 
 For an agent-specific error, use its suggested `context-reset --session <native-session-id> --agent <agent-id>` command. This resets that agent's records and compaction tracking without resetting the lead or siblings.
 

@@ -3,7 +3,7 @@ import { randomBytes, randomUUID, timingSafeEqual,createHash } from 'node:crypto
 import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
 import { join } from 'node:path';
 import { WebSocketServer, WebSocket } from 'ws';
-import { BridgeError, parseRequest, buildPrompt, parseReply, toMessage, sseEvents, MODEL_LABELS, type MessagesRequest } from '../protocol/index.js';
+import { BridgeError, ReplyFormatError, REPLY_CONTRACT, parseRequest, buildPrompt, parseReply, toMessage, sseEvents, MODEL_LABELS, type MessagesRequest } from '../protocol/index.js';
 import { ConversationStore } from './conversations.js';
 import type { ConversationCommand,ConversationReceipt,BrowserLane } from '../protocol/conversation.js';
 import {parseCancelReceipt,refusalKind,refusalMessage,type CancelReceipt} from '../protocol/cancellation.js';
@@ -16,7 +16,7 @@ import {SUMMARY_MODELS,isSummaryRequest,validateSummary,type SummaryAttempt} fro
 import {compactionPrompt,summaryPackets,assertCompactionSummary} from './summary-prompt.js';
 
 interface Options { stateDir: string; port?: number; timeoutMs?: number; queueTimeoutMs?:number;cancelTimeoutMs?:number; maxPromptChars?: number; backend?:'chrome'|'excel-desktop';selectedWindow?:number;onClose?:()=>void }
-interface Job { workerDispatched?:boolean;dispatchWorker?:WebSocket;readinessRevision?:number; id: string; kind: 'messages' | 'advice'; phase: 'queued' | 'dispatched' | 'cancelling'|'completed' | 'cancelled' | 'failed'; request: MessagesRequest; prompt: string;summary?:boolean;summaryModel?:string;summaryAttempts?:SummaryAttempt[];contextPackets?:ContextPacket[];promptChars?:number;packetCount?:number;agentId?:string;agentType?:string;requestClass?:string;runTimeoutMs:number; session: string; created: string;finished?:string;error?:string;submitted?:boolean;contextEpoch?:number;transition?:boolean;cancelRequested?:boolean;contextKind?:string;contextReason?:string;contextRemovedFields?:string[]; resolve: (text: string) => void; reject: (err: Error) => void; timer?: NodeJS.Timeout; conversation?:ConversationCommand; conversationReceipt?:ConversationReceipt;lane:BrowserLane;directFrame?:DirectFrame;deliveryFrame?:DirectFrame;cancelNonce?:string;cancelStarted?:number;cancelOutcome?:string;cancelMs?:number;settling?:boolean;cancelContinuation?:1;isolatedRecovery?:boolean;fallbackCount?:number;recoveryNotice?:string;recoveryCause?:string;images?:BrowserImage[];imagePayloads?:Map<string,BrowserImage>;imageCount?:number;imageBytes?:number }
+interface Job { resultSettling?:boolean;formatAttempt?:1;workerDispatched?:boolean;dispatchWorker?:WebSocket;readinessRevision?:number; id: string; kind: 'messages' | 'advice'; phase: 'queued' | 'dispatched' | 'cancelling'|'completed' | 'cancelled' | 'failed'; request: MessagesRequest; prompt: string;summary?:boolean;summaryModel?:string;summaryAttempts?:SummaryAttempt[];contextPackets?:ContextPacket[];promptChars?:number;packetCount?:number;agentId?:string;agentType?:string;requestClass?:string;runTimeoutMs:number; session: string; created: string;finished?:string;error?:string;submitted?:boolean;contextEpoch?:number;transition?:boolean;cancelRequested?:boolean;contextKind?:string;contextReason?:string;contextRemovedFields?:string[]; resolve: (text: string) => void; reject: (err: Error) => void; timer?: NodeJS.Timeout; conversation?:ConversationCommand; conversationReceipt?:ConversationReceipt;lane:BrowserLane;directFrame?:DirectFrame;deliveryFrame?:DirectFrame;cancelNonce?:string;cancelStarted?:number;cancelOutcome?:string;cancelMs?:number;settling?:boolean;cancelContinuation?:1;isolatedRecovery?:boolean;fallbackCount?:number;recoveryNotice?:string;recoveryCause?:string;images?:BrowserImage[];imagePayloads?:Map<string,BrowserImage>;imageCount?:number;imageBytes?:number }
 function nativeSession(req:IncomingMessage,request:MessagesRequest):string|undefined {
  const header=req.headers['x-claude-code-session-id']??req.headers['x-bridge-session'];if(validSession(header))return header;
  try{const metadata=typeof request.metadata?.user_id==='string'?JSON.parse(request.metadata.user_id):request.metadata;if(validSession(metadata?.session_id))return metadata.session_id;}catch{}
@@ -60,7 +60,7 @@ export async function startGateway(options: Options) {
   let previousInterrupted = 0;
   try { const previous = JSON.parse(await readFile(ledger, 'utf8')); previousInterrupted = previous.jobs.filter((j: any) => ['queued', 'dispatched','cancelling'].includes(j.phase)).length; const latest=new Map<string,any>();for(const job of previous.jobs)if(job.lane!=='auxiliary')latest.set(JSON.stringify([job.session,job.model,job.agentId]),job);for(const job of latest.values())if(job.phase==='failed'&&job.error==='Copilot refused external-client relay use')await direct.restoreLegacyFailure(job.session,job.model,job.agentId,job.error); } catch {}
   function persist() {
-    const snapshot = JSON.stringify({ updated: new Date().toISOString(), jobs: [...jobs.values()].map(({ id, phase, created, finished, error, submitted, session, request,lane,contextKind,contextReason,contextRemovedFields,promptChars,packetCount,summary,summaryModel,summaryAttempts,agentId,agentType,requestClass,cancelOutcome,cancelMs,fallbackCount,recoveryCause,imageCount,imageBytes,conversation,contextEpoch }) => ({ id, phase, created, finished, error, submitted, session,lane,contextKind,contextReason,contextRemovedFields,promptChars,packetCount,summary,summaryModel,summaryAttempts,agentId,agentType,requestClass,cancelOutcome,cancelMs,fallbackCount,recoveryCause,imageCount,imageBytes,conversationId:conversation?.id,contextEpoch, model: request.model })) });
+    const snapshot = JSON.stringify({ updated: new Date().toISOString(), jobs: [...jobs.values()].map(({ id, phase, created, finished, error, submitted, session, request,lane,contextKind,contextReason,contextRemovedFields,promptChars,packetCount,summary,summaryModel,summaryAttempts,agentId,agentType,requestClass,cancelOutcome,cancelMs,fallbackCount,recoveryCause,formatAttempt,imageCount,imageBytes,conversation,contextEpoch }) => ({ id, phase, created, finished, error, submitted, session,lane,contextKind,contextReason,contextRemovedFields,promptChars,packetCount,summary,summaryModel,summaryAttempts,agentId,agentType,requestClass,cancelOutcome,cancelMs,fallbackCount,recoveryCause,formatAttempt,imageCount,imageBytes,conversationId:conversation?.id,contextEpoch, model: request.model })) });
     persistence = persistence.then(async () => { const temp = ledger + '.tmp'; await writeFile(temp, snapshot, { mode: 0o600 }); await rename(temp, ledger); });
     return persistence;
   }
@@ -117,13 +117,34 @@ export async function startGateway(options: Options) {
     }
     if(['queued','dispatched'].includes(job.phase)){if(job.workerDispatched)send({type:'cancel',id:job.id,lane:job.lane});const error=new Error('Client disconnected; browser request cancelled');error.name='AbortError';finish(job,error);}
   }
+  async function correctFormatOnce(job:Job,receipt:unknown){
+    if(job.transition)return true;
+    if(job.formatAttempt||!job.directFrame||!job.conversation||job.phase!=='dispatched'||job.cancelContinuation!==1)return false;
+    job.transition=true;clearTimeout(job.timer);
+    const oldId=job.id;
+    try{
+      // Only a completed, authenticated response with verified chat evidence
+      // permits this follow-up. Never replay the client request or switch chats.
+      const observed=await conversations.complete(job.conversation,receipt,oldId),nextId=randomUUID();
+      const conversation=await conversations.reserve({mode:'continue',id:observed.id,workspaceKey:job.directFrame.workspaceKey,lane:job.lane},job.request.model,nextId);
+      let frame:DirectFrame;try{frame=await direct.correctFormat(job.directFrame,nextId,observed.id);}catch(error){await conversations.cancelBeforeDispatch(conversation.id,nextId);throw error;}
+      clearTimeout(job.timer);
+      jobs.set(oldId,{...job,phase:'failed',finished:new Date().toISOString(),error:'Malformed JSON; one same-chat format correction queued',request:{model:job.request.model,max_tokens:1,messages:[]},prompt:'',images:undefined,imagePayloads:undefined,contextPackets:undefined,directFrame:undefined,deliveryFrame:undefined});
+      if(active?.id===oldId)active=undefined;
+      Object.assign(job,{id:nextId,directFrame:frame,conversation,conversationReceipt:undefined,phase:'queued',submitted:undefined,workerDispatched:false,dispatchWorker:undefined,formatAttempt:1,resultSettling:false,images:undefined,contextPackets:undefined,isolatedRecovery:false,contextKind:'format-correction',contextReason:'malformed-json'});
+      job.prompt='Your previous reply could not be parsed as valid JSON and was NOT delivered to the client. None of its proposed tool calls was executed. Correct only that reply\'s JSON serialization; preserve its intended text and tool arguments. Do not repeat previously completed local tools or invent tool results. Do not restart the task, change models or edit the workbook. '+REPLY_CONTRACT;
+      job.promptChars=job.prompt.length;job.packetCount=1;jobs.set(nextId,job);job.timer=setTimeout(()=>expire(job),options.queueTimeoutMs??900000);await persist();return true;
+    }catch(error){finish(job,error instanceof BridgeError?error:new BridgeError(error instanceof Error?error.message:'Could not prepare reply correction',502,'api_error'));return true;}
+    finally{job.transition=false;if(job.cancelRequested){job.cancelRequested=false;beginClientCancel(job);}void dispatch();}
+  }
   async function fallbackOnce(job:Job,cause:string){
     if(job.transition)return true;
+    if(job.formatAttempt)return false;
     if(job.fallbackCount||!job.directFrame||!job.conversation||job.phase!=='dispatched'||job.cancelContinuation!==1||!(job.conversation.mode==='continue'||freshNativeMain(job)))return false;
     job.transition=true;for(const secret of [clientKey,workerToken,pairCode])if(secret)cause=cause.replaceAll(secret,'[local credential]');job.recoveryCause=cause.slice(0,500);const oldId=job.id;try{const nextId=randomUUID();const fullPrompt=renderContextPrompt(job.request,planContext(job.request,undefined,'original-chat-unavailable'),freshNativeMain(job)?job.directFrame.epoch:job.directFrame.epoch+1,options.maxPromptChars),packets=segmentContext(fullPrompt,nextId),images=imagesForMessages(job.request.messages,job.imagePayloads??new Map());if(packets&&contextPacketSupport!==1)throw new BridgeError('Reload the Chrome bridge extension to enable segmented long-context recovery. Nothing was submitted.',503,'api_error');await conversations.cancelBeforeDispatch(job.conversation.id,oldId);
     const conversation=await conversations.reserve({mode:'new',workspaceKey:job.directFrame.workspaceKey,lane:job.lane},job.request.model,nextId);let frame:DirectFrame;try{frame=await direct.fallback(job.directFrame,job.request,nextId);}catch(error){await conversations.cancelBeforeDispatch(conversation.id,nextId);throw error;}
     clearTimeout(job.timer);jobs.set(oldId,{...job,phase:'failed',finished:new Date().toISOString(),error:'Original chat unavailable; one isolated recovery queued',request:{model:job.request.model,max_tokens:1,messages:[]},prompt:'',images:undefined,imagePayloads:undefined,contextPackets:undefined,directFrame:undefined,deliveryFrame:undefined});
-    if(active?.id===oldId)active=undefined;Object.assign(job,{id:nextId,directFrame:frame,conversation,conversationReceipt:undefined,phase:'queued',submitted:undefined,images,imageCount:images.length,imageBytes:images.reduce((sum,image)=>sum+image.bytes,0),workerDispatched:false,dispatchWorker:undefined,isolatedRecovery:true,fallbackCount:1,recoveryNotice:'[Bridge] 原 Copilot 聊天无法恢复，已在新的聊天中完整同步上下文。',contextEpoch:frame.epoch,contextKind:'bootstrap',contextReason:'original-chat-unavailable'});
+    if(active?.id===oldId)active=undefined;Object.assign(job,{id:nextId,directFrame:frame,conversation,conversationReceipt:undefined,phase:'queued',submitted:undefined,images,imageCount:images.length,imageBytes:images.reduce((sum,image)=>sum+image.bytes,0),workerDispatched:false,dispatchWorker:undefined,isolatedRecovery:true,fallbackCount:1,resultSettling:false,recoveryNotice:'[Bridge] 原 Copilot 聊天无法恢复，已在新的聊天中完整同步上下文。',contextEpoch:frame.epoch,contextKind:'bootstrap',contextReason:'original-chat-unavailable'});
     job.prompt=fullPrompt;job.contextPackets=packets;job.promptChars=job.prompt.length;job.packetCount=job.contextPackets?.length??1;jobs.set(nextId,job);job.timer=setTimeout(()=>expire(job),options.queueTimeoutMs??900000);await persist();return true;}catch(error){finish(job,error instanceof BridgeError?error:new BridgeError(error instanceof Error?error.message:'Could not prepare recovery',502,'api_error'));return true;}finally{job.transition=false;if(job.cancelRequested){job.cancelRequested=false;beginClientCancel(job);}void dispatch();}
   }
   function json(res: ServerResponse, statusCode: number, data: unknown) { res.writeHead(statusCode, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'x-should-retry': 'false' }); res.end(JSON.stringify(data)); }
@@ -220,7 +241,7 @@ export async function startGateway(options: Options) {
       void dispatch();
       const text = await result;
       if (advisory) { json(res, 200, { requestId: job.id, model: request.model, advice: text, usage: 'unavailable',backend,transport:desktop?'excel-desktop-uia':'copilot-ui-json',...(job.conversationReceipt?{conversation:job.conversationReceipt,contextMode:job.conversation?.mode,contextContinuity:desktop?'same-excel-desktop-chat':'same-browser-chat',conversationVerification:{source:desktop?'authenticated local Excel desktop adapter':'authenticated local browser adapter',method:desktop?'sha256-last-user-and-assistant-accessibility-messages':'sha256-last-user-and-assistant-messages',beforeCursor:job.conversation?.expectedCursor??null,afterCursor:job.conversationReceipt.cursor,resumability:'active-chat-only'}}:{}) }); return; }
-      const reply=parseReply(text,request);if(job.recoveryNotice)reply.content.unshift({type:'text',text:job.recoveryNotice});const message = toMessage(request, reply, job.id,session&&syncing?{input_tokens:estimateTokens(request),output_tokens:estimateTokens(reply)}:undefined);
+      const reply=parseReply(text,request);if(job.formatAttempt)reply.content.unshift({type:'text',text:'[Bridge] Copilot 回复格式异常，已在原聊天中自动纠正一次。'});if(job.recoveryNotice)reply.content.unshift({type:'text',text:job.recoveryNotice});const message = toMessage(request, reply, job.id,session&&syncing?{input_tokens:estimateTokens(request),output_tokens:estimateTokens(reply)}:undefined);
       if (request.stream) { for (const event of sseEvents(message)) res.write(`event: ${event.event}\ndata: ${JSON.stringify(event.data)}\n\n`); res.end(); }
       else json(res, 200, message);
     } catch (error) {
@@ -265,6 +286,7 @@ export async function startGateway(options: Options) {
         if (value.type === 'ready') { readinessRevision++;ready = value.ready === true;if(ready)everReady=true;if(value.conversationControl!==undefined)conversationControl=value.conversationControl===true&&value.conversationResumability==='active-chat-only';if(value.sessionSyncVersion!==undefined)sessionSyncVersion=value.sessionSyncVersion===1?1:0;if(value.auxiliaryLanes!==undefined)auxiliaryLanes=value.auxiliaryLanes===true;if(value.auxiliaryBootstrap!==undefined)auxiliaryBootstrap=value.auxiliaryBootstrap===1?1:0;if(value.contextPackets!==undefined)contextPacketSupport=value.contextPackets===1?1:0;if(value.summaryRouting!==undefined)summaryRouting=value.summaryRouting===1?1:0;if(value.agentContexts!==undefined)agentContexts=value.agentContexts===1?1:0;if(value.cancelContinuation!==undefined)cancelContinuation=value.cancelContinuation===1?1:0;if(value.imageInput!==undefined)imageInput=value.imageInput===1?1:0;void dispatch(); return; }
         if (value.type === 'result' || value.type === 'failure') {
           const job = jobs.get(value.id);
+          if(job?.transition)return;
           if(job?.phase==='cancelling'){
             if(value.type==='failure'&&value.code==='provider_refusal')await settleCancelled(job,{version:1,jobId:job.id,nonce:job.cancelNonce!,conversationId:job.conversation!.id,lane:job.lane,outcome:'unverified',inputComplete:false,replyState:'none',reason:'provider_refusal',refusalKind:refusalKind(value.error)});
             return;
@@ -282,11 +304,19 @@ export async function startGateway(options: Options) {
             else finish(job,new BridgeError(String(value.error || 'Copilot transport failed'),502,'api_error'));
           }
           else {
+            // Deduplicate before the first asynchronous persistence operation.
+            // Keep cancellation independent so it can still claim this job.
+            if(job.resultSettling)return;job.resultSettling=true;
             if (typeof value.text !== 'string') throw new Error('Missing reply text');
             if(job.images?.length&&(!Array.isArray(value.imageIds)||value.imageIds.length!==job.images.length||job.images.some((image,index)=>value.imageIds[index]!==image.id)))throw new Error('Browser did not verify actual image attachment delivery; the reply was not returned');
             if(job.summary){validateSummary(value.text);assertCompactionSummary(value.text);}
             // Count a success only after validating the actual upstream response.
-            if (job.kind === 'messages') parseReply(value.text, job.request);
+            if (job.kind === 'messages') {
+              try{parseReply(value.text,job.request);}catch(error){
+                if(error instanceof ReplyFormatError&&/^(?:```(?:json)?\s*\{|\{\s*"content"\s*:)/.test(value.text.trim())&&await correctFormatOnce(job,value.conversation)){send({type:'ack',id:value.id});return;}
+                throw error;
+              }
+            }
             else if (!value.text.trim() || value.text.length > 500000) throw new Error('Empty or oversized advisory response');
             if(job.conversation)job.conversationReceipt=await conversations.complete(job.conversation,value.conversation,job.id);
             else if(job.lane==='auxiliary')await conversations.invalidateLane('auxiliary');
