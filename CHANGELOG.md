@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Remove lifetime count caps from conversation, native-context and compaction registries, including restart loading, while preserving all existing state.
+
 - Recover a closed paired main tab on the first native request instead of leaving Claude Code waiting after an auxiliary title reply.
 
 - Forward base64 images from native Read/user messages as verified Copilot attachments, preserving stable image references and allowing subsequent feedback to continue without repeating image uploads.

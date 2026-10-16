@@ -86,6 +86,8 @@ This configures the client's threshold. It does not establish Copilot's provider
 
 ## Recovery and stopping
 
+Conversation, native-context and compaction registries have no fixed lifetime record-count ceiling, including on reload. The old `Conversation registry limit reached` error came from a local 100-record cap, not a turn count or Copilot quota. Update and restart an idle gateway without clearing history or resetting the task.
+
 Native subagents and in-process teammates have separate context records keyed by session, agent and model. Each agent continues in its own bridge-owned workbook tab. Browser inference is serialized through one queue; local tools remain under Claude Code. Queue waiting and generation have separate deadlines, and canceling an unsent request does not cancel a sibling. Up to 16 agent tabs are retained; close completed tabs manually. Split-pane team processes have an observed missing-agent-identity routing failure with lead-context 409 errors; use in-process teammates. After rebuilding/reloading the extension, `doctor` must show `capabilities.agentContexts: 1` for agent routing.
 
 Native Auto mode passed a limited live check: three named teammates started together and each continued with Write, Read and Bash without manual Yes approvals. See the [validation scope](docs/public/validation.md) for details and limitations.

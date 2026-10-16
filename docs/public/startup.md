@@ -128,6 +128,7 @@ node dist/packages/cli/index.js stop
 
 | 提示 | 检查和处理 |
 | --- | --- |
+| `Conversation registry limit reached` / `Native context registry is full` / `Compaction registry is full` | 旧网关对累计登记设置了 100 条上限。本版已取消新增和重启加载时的数量上限；更新并在空闲时重启网关，保留原状态文件，不需要清空历史或 `context-reset`。 |
 | `fetch failed` | 旧的直接 `run` 命令要求网关已经运行。先用启动入口 `--check`；如果仍失败，查看目标环境的网关日志、端口和 `doctor` 输出。 |
 | `extension is not connected` | 网关已运行，但 Chrome 未连接。尤其检查 Windows `59173` 与 WSL `59175` 是否选错。启动 WSL 不会自动改变扩展目标。 |
 | Copilot 只返回会话标题，Claude Code 一直等待 | 标题使用独立辅助页，不能证明主聊天可用。原生客户端已启动后若配对主标签页被关闭，新会话首轮会检查原页面，并在确认未发送且页面不可用时最多创建一次恢复页，显示完整同步提示。若启动前就未就绪，打开工作簿与 Copilot，再点 **Use selected Excel tab**。 |

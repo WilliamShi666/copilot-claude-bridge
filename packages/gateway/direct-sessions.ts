@@ -17,7 +17,8 @@ export class DirectSessions {
  async load(){
   await mkdir(this.stateDir,{recursive:true,mode:0o700});let saved:any;
   try{saved=JSON.parse(await readFile(join(this.stateDir,'direct-contexts.json'),'utf8'));}catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')return;throw new Error('Direct context metadata is unreadable; no browser context was resumed.');}
-  if(!Array.isArray(saved.records)||saved.records.length>100||!Array.isArray(saved.compactions)||saved.compactions.length>100)throw new Error('Invalid direct context registry');
+  // Retain long-lived context/refusal/compaction evidence regardless of lifetime session count.
+  if(!Array.isArray(saved.records)||!Array.isArray(saved.compactions))throw new Error('Invalid direct context registry');
   for(const record of saved.records){
    if(!validSession(record.sessionId)||(record.agentId!==undefined&&!validAgent(record.agentId))||typeof record.key!=='string'||! /^[a-f0-9]{64}$/.test(record.workspaceKey)||!Number.isInteger(record.epoch)||!['ready','busy','cancelling','uncertain'].includes(record.state))throw new Error('Invalid direct context record');
    if(record.snapshot&&(!Array.isArray(record.snapshot.messageHashes)||record.snapshot.messageHashes.length>10000||!record.snapshot.messageHashes.every((h:any)=>typeof h==='string'&&/^[a-f0-9]{64}$/.test(h))||!record.snapshot.controlHashes||!Object.values(record.snapshot.controlHashes).every(h=>typeof h==='string'&&/^[a-f0-9]{64}$/.test(h))))throw new Error('Invalid direct context fingerprints');
@@ -44,7 +45,7 @@ export class DirectSessions {
   if(record?.state==='busy')throw new BridgeError('Native context is busy; overlapping main requests are not mixed',409);
   const interruptedFeedback=record?.state==='uncertain'&&record.interruption&&appendedUserFeedback(request,record.interruption);
   if(record?.state==='uncertain'&&!interruptedFeedback)throw new BridgeError('Native context delivery is uncertain. Use context-reset --session '+sessionId+(agentId?' --agent '+agentId:'')+' before resynchronizing.'+(record.deliveryFailure?' Last failure: '+record.deliveryFailure:''),409);
-  if(!record){if(this.records.size>=100)throw new BridgeError('Native context registry is full',429);record={key,sessionId,agentId,workspaceKey,model:request.model,epoch:0,state:'ready',compactSequence:0,updated:new Date().toISOString()};this.records.set(key,record);}
+  if(!record){record={key,sessionId,agentId,workspaceKey,model:request.model,epoch:0,state:'ready',compactSequence:0,updated:new Date().toISOString()};this.records.set(key,record);}
   const compact=this.compactions.get(scopeKey(sessionId,agentId));const sequence=compact?.sequence??0;
   const resume=cancelContinuation&&interruptedFeedback&&!contextCompacted&&sequence===record.compactSequence?record.resume:undefined;
   const force=record.resetReason??(interruptedFeedback?'client-interrupted-feedback':contextCompacted||sequence>record.compactSequence?'native-compaction':undefined);
@@ -90,7 +91,7 @@ export class DirectSessions {
   if(!validSession(sessionId)||(agentId!==undefined&&!validAgent(agentId))||(workspaceKey!==undefined&&!/^[a-f0-9]{64}$/.test(workspaceKey)))throw new BridgeError('Invalid compaction identity');
   for(const record of this.records.values())if(record.sessionId===sessionId&&record.agentId===agentId&&workspaceKey&&workspaceKey!==record.workspaceKey)throw new BridgeError('Compaction workspace does not match',409);
   let state=this.compactions.get(scopeKey(sessionId,agentId));if(state?.workspaceKey&&workspaceKey&&state.workspaceKey!==workspaceKey)throw new BridgeError('Compaction workspace changed',409);
-  if(!state){if(this.compactions.size>=100)throw new BridgeError('Compaction registry is full',429);state={sessionId,agentId,workspaceKey,phase:'ready',sequence:0,trigger};}
+  if(!state){state={sessionId,agentId,workspaceKey,phase:'ready',sequence:0,trigger};}
   state.trigger=trigger;state.phase=event==='PreCompact'?'running':'ready';if(event==='PostCompact')state.sequence++;this.compactions.set(scopeKey(sessionId,agentId),state);await this.persist();
  }
  compacting(sessionId:string,agentId?:string){return this.compactions.get(scopeKey(sessionId,agentId))?.phase==='running';}

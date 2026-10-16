@@ -58,13 +58,20 @@ test('canceling a queued agent never cancels the active sibling and leaves its c
  const retry=s.send(request('RETRY'),'writer-b');await until(()=>s.jobs.length===3);s.reply(s.jobs[2]);assert.equal((await retry).status,200);
  }finally{await s.close();}
 });
-test('time waiting in the browser queue does not consume the inference timeout',async()=>{
- const s=await setup(1000);try{
- const first=s.send(request('FIRST'),'writer-a');await until(()=>s.jobs.length===1);const second=s.send(request('SECOND'),'writer-b');await until(()=>s.g.status().queued===1);
- await new Promise(r=>setTimeout(r,650));s.reply(s.jobs[0]);assert.equal((await first).status,200);await until(()=>s.jobs.length===2);
- await new Promise(r=>setTimeout(r,550));s.reply(s.jobs[1]);assert.equal((await second).status,200);
- }finally{await s.close();}
+test('time waiting in the browser queue does not consume the inference timeout',async t=>{
+ const inferenceLimit=1234,realSetTimeout=globalThis.setTimeout,realClearTimeout=globalThis.clearTimeout;let now=0;const inferenceTimers=new Map<NodeJS.Timeout,{deadline:number;run:()=>void}>();
+ // Only the configured inference deadline uses this clock. Network polling,
+ // authentication and the separate queue deadline retain their real timers.
+ t.mock.method(globalThis,'setTimeout',((callback:any,delay?:number,...args:any[])=>{if(delay!==inferenceLimit)return realSetTimeout(callback,delay,...args);const token={} as NodeJS.Timeout;inferenceTimers.set(token,{deadline:now+delay,run:()=>callback(...args)});return token;}) as typeof setTimeout);
+ t.mock.method(globalThis,'clearTimeout',((timer:any)=>{if(!inferenceTimers.delete(timer))realClearTimeout(timer);}) as typeof clearTimeout);
+ const advance=(ms:number)=>{now+=ms;for(const [token,timer]of [...inferenceTimers])if(timer.deadline<=now){inferenceTimers.delete(token);timer.run();}};
+ const s=await setup(inferenceLimit);try{
+ const first=s.send(request('FIRST'),'writer-a');void first.catch(()=>{});await until(()=>s.jobs.length===1);const second=s.send(request('SECOND'),'writer-b');void second.catch(()=>{});await until(()=>s.g.status().queued===1);
+ assert.equal(inferenceTimers.size,1,'queued request must not have an inference timer');advance(800);s.reply(s.jobs[0]);assert.equal((await first).status,200);await until(()=>s.jobs.length===2);
+ assert.equal(inferenceTimers.size,1);advance(800);s.reply(s.jobs[1]);assert.equal((await second).status,200);assert.equal(inferenceTimers.size,0);assert.ok(now>inferenceLimit,'combined queue and inference time must exceed one inference budget');
+ }finally{await s.close();t.mock.restoreAll();}
 });
+
 test('in-process teammate headers use an agent chat even when request-class says main',async()=>{
  const s=await setup();try{const pending=s.send(request('TEAMMATE'),'writer@team',undefined,'main');await until(()=>s.jobs.length===1);assert.match(s.jobs[0].lane,/^agent:/);s.reply(s.jobs[0]);assert.equal((await pending).status,200);}finally{await s.close();}
 });

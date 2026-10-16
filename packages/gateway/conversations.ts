@@ -14,7 +14,8 @@ export class ConversationStore {
   constructor(private stateDir:string) {}
   async load() {
     try {
-      const saved=z.array(recordSchema).max(100).parse(JSON.parse(await readFile(join(this.stateDir,'conversations.json'),'utf8')));
+      // Lifetime registrations preserve continuation evidence; validate each record without a count cap.
+      const saved=z.array(recordSchema).parse(JSON.parse(await readFile(join(this.stateDir,'conversations.json'),'utf8')));
       for(const record of saved) { if(record.state==='busy'||record.state==='cancelling')record.state='uncertain'; delete record.jobId; this.records.set(record.id,record); }
     } catch { /* Missing/corrupt metadata never invents resumable chats. */ }
   }
@@ -30,7 +31,6 @@ export class ConversationStore {
     let record:Record;
     if(input.mode==='new') {
       if(input.id)throw new BridgeError('New conversations must not supply an existing id',400);
-      if(this.records.size>=100)throw new BridgeError('Conversation registry limit reached',429);
       const id=randomUUID(); record={id,title:'M365 Bridge '+id,workspaceKey:input.workspaceKey,model,lane:input.lane??'main',state:'busy',jobId,updated:new Date().toISOString()};
       this.records.set(id,record);
     } else {
