@@ -3,7 +3,7 @@ import {trustedEnterObservation,ImageInputFailure} from './image-input.js';
 import {TransportFailure,refusalKind,type RefusalKind,type CancelReceipt,type FailureCode} from '../protocol/cancellation.js';
 import type { ConversationReceipt } from '../protocol/conversation.js';
 import {SUMMARY_MODELS,type SummaryAttempt} from '../protocol/summary.js';
-interface Entry { id: string; phase: 'preparing' | 'submitted' | 'done' | 'failed'; text?: string; error?: string;code?:FailureCode; submitted?:boolean; updated: number; conversation?:ConversationReceipt;imageIds?:string[];summaryModel?:string;summaryAttempts?:SummaryAttempt[] }
+interface Entry { contextAckRepairs?:number;contextAckRepairChars?:number; id: string; phase: 'preparing' | 'submitted' | 'done' | 'failed'; text?: string; error?: string;code?:FailureCode; submitted?:boolean; updated: number; conversation?:ConversationReceipt;imageIds?:string[];summaryModel?:string;summaryAttempts?:SummaryAttempt[] }
 // Reinjection must not register a second listener or submit a request twice.
 const capabilities={contextPackets:1,summaryRouting:1,cancelContinuation:1,imageInput:1,trustedImageInput:10} as const;
 const root = globalThis as typeof globalThis & { __m365BridgeInstalled?: boolean };
@@ -16,12 +16,12 @@ if (!root.__m365BridgeInstalled && /^https:\/\/[^/]+\.officeapps\.live\.com\//.t
   async function run(job: BrowserJob) {
     const previous = (await chrome.storage.local.get(key(job.id)))[key(job.id)] as Entry | undefined;
     if(cancelledBeforeStart.has(job.id))throw Object.assign(new Error('Cancelled before content dispatch'),{submitted:false});
-    if (previous?.phase === 'done') { await chrome.runtime.sendMessage({ type: 'result', id: job.id, text: previous.text,conversation:previous.conversation,imageIds:previous.imageIds,summaryModel:previous.summaryModel,summaryAttempts:previous.summaryAttempts }); return; }
-    if (previous) { await chrome.runtime.sendMessage({ type: 'failure', id: job.id, error: 'Previously started request is uncertain; automatic resubmission prevented',submitted:previous.submitted }); return; }
+    if (previous?.phase === 'done') { await chrome.runtime.sendMessage({ type: 'result', id: job.id, text: previous.text,conversation:previous.conversation,imageIds:previous.imageIds,summaryModel:previous.summaryModel,summaryAttempts:previous.summaryAttempts,contextAckRepairs:previous.contextAckRepairs,contextAckRepairChars:previous.contextAckRepairChars }); return; }
+    if (previous) { await chrome.runtime.sendMessage({ type: 'failure', id: job.id, error: 'Previously started request is uncertain; automatic resubmission prevented',submitted:previous.submitted,contextAckRepairs:previous.contextAckRepairs,contextAckRepairChars:previous.contextAckRepairChars }); return; }
     if (current) throw Object.assign(new Error('Another request is active in the paired frame'),{submitted:false});
     const controller = new AbortController();const running:Running={id:job.id,job,controller,submitted:false,...(job.cancelContinuation===1||job.images?.length?{turn:observeTurn(document)}:{})};current=running;recent.set(job.id,running);for(const id of [...recent.keys()].slice(0,-4))recent.delete(id);let submitted=false;
     await save({ id: job.id, phase: 'preparing', submitted:false,updated: Date.now() });
-    let summaryModel:string|undefined;const summaryAttempts:SummaryAttempt[]=[];
+    let summaryModel:string|undefined;const summaryAttempts:SummaryAttempt[]=[];let contextAckRepairs=0,contextAckRepairChars=0;
     try {
       const text = await exchange(document, job, controller.signal, async () => {submitted=true;if(current?.id===job.id)current.submitted=true;await save({ id: job.id, phase: 'submitted',submitted:true, updated: Date.now() });},model=>{summaryModel=model;},attempt=>{summaryAttempts.push(attempt);},running.turn,async modelLabel=>{
         controller.signal.throwIfAborted();running.imageNonce=crypto.randomUUID();running.imageModel=modelLabel;running.imageAttempt=job.summary?SUMMARY_MODELS.findIndex(model=>model===modelLabel)+1:1;
@@ -30,13 +30,13 @@ if (!root.__m365BridgeInstalled && /^https:\/\/[^/]+\.officeapps\.live\.com\//.t
           if(response?.submitted!==true)throw new ImageInputFailure(response?.error??'Trusted image input was not confirmed',response?.inputAttempted!==false);
           observed.arm();if(!await observed.promise)throw new Error('Trusted Enter did not reach the verified Copilot Send button; input was not repeated');
         }finally{observed.dispose();delete running.imageEditor;delete running.imageTarget;}
-      });
+      },chars=>{contextAckRepairs++;contextAckRepairChars+=chars;});
       const conversation=await captureConversation(document,job,controller.signal);const imageIds=verifyImageDelivery(document,job);
-      await save({ id: job.id, phase: 'done', text, updated: Date.now(),conversation,imageIds,summaryModel,summaryAttempts });
+      await save({ id: job.id, phase: 'done', text, updated: Date.now(),conversation,imageIds,summaryModel,summaryAttempts,contextAckRepairs,contextAckRepairChars });
       // No further page operations remain. Release the execution lock before
       // publishing: the native tool result can arrive before runtime ACK does.
       if(running.turn)running.turn.finished=true;if(current?.id===job.id)current=undefined;
-      if(!running.cancelled)await chrome.runtime.sendMessage({ type: 'result', id: job.id, text,conversation,imageIds,summaryModel,summaryAttempts });
+      if(!running.cancelled)await chrome.runtime.sendMessage({ type: 'result', id: job.id, text,conversation,imageIds,summaryModel,summaryAttempts,contextAckRepairs,contextAckRepairChars });
     } catch (err) {
       if(running.imageObservation)controller.abort();
       if(err instanceof ImageInputFailure&&!err.inputAttempted&&running.turn){
@@ -47,8 +47,8 @@ if (!root.__m365BridgeInstalled && /^https:\/\/[^/]+\.officeapps\.live\.com\//.t
         submitted=running.turn.sentPackets>0;running.submitted=submitted;
       }
       if(submitted){if(running.turn)stopOwnedTurn(document,running.turn);else stop(document);}const baseError=err instanceof Error ? err.message : 'Browser error',trace=running.imageObservation?.trace()??[],error=baseError+(trace.length?' [image Enter events: '+JSON.stringify(trace)+']':''),code=err instanceof TransportFailure?err.code:undefined;running.failureCode=code;if(code==='provider_refusal')running.failureKind=refusalKind(baseError);
-      await save({ id: job.id, phase: 'failed', error,code,submitted, updated: Date.now(),summaryModel,summaryAttempts });
-      if(!running.cancelled||code==='provider_refusal')await chrome.runtime.sendMessage({ type: 'failure', id: job.id, error,code,submitted,summaryModel,summaryAttempts });
+      await save({ id: job.id, phase: 'failed', error,code,submitted, updated: Date.now(),summaryModel,summaryAttempts,contextAckRepairs,contextAckRepairChars });
+      if(!running.cancelled||code==='provider_refusal')await chrome.runtime.sendMessage({ type: 'failure', id: job.id, error,code,submitted,summaryModel,summaryAttempts,contextAckRepairs,contextAckRepairChars });
     } finally {running.imageObservation?.dispose();for(const image of running.job.images??[])image.data='';if(running.turn)running.turn.finished=true;if(current?.id===job.id)current=undefined;await chrome.runtime.sendMessage({ type: 'frame-ready', ...inspect(document),ready:!current&&inspect(document).ready,...capabilities }).catch(() => {}); }
   }
   chrome.runtime.onMessage.addListener((message, _sender, respond) => {
@@ -84,9 +84,9 @@ if (!root.__m365BridgeInstalled && /^https:\/\/[^/]+\.officeapps\.live\.com\//.t
     if (message.type === 'recover') {
       void (async () => {
         const entry = (await chrome.storage.local.get(key(message.id)))[key(message.id)] as Entry | undefined;
-        if (entry?.phase === 'done') respond({ type: 'result', id: message.id, text: entry.text,conversation:entry.conversation,imageIds:entry.imageIds,summaryModel:entry.summaryModel,summaryAttempts:entry.summaryAttempts });
+        if (entry?.phase === 'done') respond({ type: 'result', id: message.id, text: entry.text,conversation:entry.conversation,imageIds:entry.imageIds,summaryModel:entry.summaryModel,summaryAttempts:entry.summaryAttempts,contextAckRepairs:entry.contextAckRepairs,contextAckRepairChars:entry.contextAckRepairChars });
         else if (current?.id === message.id) respond({ running: true });
-        else respond({ type: 'failure', id: message.id, error: entry?.error ?? 'Request was interrupted; resubmission prevented',code:entry?.code,submitted:entry?.submitted,summaryModel:entry?.summaryModel,summaryAttempts:entry?.summaryAttempts });
+        else respond({ type: 'failure', id: message.id, error: entry?.error ?? 'Request was interrupted; resubmission prevented',code:entry?.code,submitted:entry?.submitted,summaryModel:entry?.summaryModel,summaryAttempts:entry?.summaryAttempts,contextAckRepairs:entry?.contextAckRepairs,contextAckRepairChars:entry?.contextAckRepairChars });
       })(); return true;
     }
     return false;

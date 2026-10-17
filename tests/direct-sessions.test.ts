@@ -6,6 +6,62 @@ import type {CancelReceipt} from '../packages/protocol/cancellation.js';
 const request={model:'copilot-opus-5.5',max_tokens:1000,tools:[],messages:[{role:'user',content:'PRIVATE_SOURCE_SHOULD_NOT_BE_PERSISTED'}]};
 const cancellation=(frame:any,conversationId:string,overrides:Partial<CancelReceipt>={}):CancelReceipt=>({version:1,jobId:frame.jobId,nonce:'nonce',conversationId,lane:'main',outcome:'settled',inputComplete:true,replyState:'partial',cursor:'a'.repeat(64),pageInstance:'page-1',...overrides});
 
+test('native withdrawn text prompt accepts replacement feedback after restart for settled and unverified cancellations',async()=>{
+ for(const outcome of ['settled','unverified'] as const){const dir=await mkdtemp(join(tmpdir(),'direct-withdrawn-'));try{
+  let store=new DirectSessions(dir);await store.load();const first=await store.prepare('native-A','a'.repeat(64),request,'first');await store.commit(first,'original');
+  const prefix=[...request.messages,{role:'assistant',content:'Committed answer'}],interrupted={...request,messages:[...prefix,{role:'user',content:'Explain at length'}]};
+  const frame=await store.prepare('native-A','a'.repeat(64),interrupted,'cancelled',false,undefined,true);await store.beginCancellation(frame);await store.settleCancellation(frame,cancellation(frame,'original',{outcome}));
+  store=new DirectSessions(dir);await store.load();
+  await assert.rejects(store.prepare('native-A','a'.repeat(64),interrupted,'same'),/uncertain/);
+  const feedback={...request,messages:[...prefix,{role:'user',content:'Instead read the existing file'},{role:'system',content:'Updated runtime details'}]};
+  const resumed=await store.prepare('native-A','a'.repeat(64),feedback,'new-feedback',false,undefined,true);
+  assert.equal(resumed.plan.kind,outcome==='settled'?'resume':'bootstrap');assert.equal(resumed.isolatedRecovery,outcome==='unverified');assert.equal(resumed.epoch,outcome==='settled'?1:2);
+  if(outcome==='settled'){assert.equal(resumed.conversationId,'original');assert.equal(resumed.plan.retainedMessageCount,prefix.length);}
+  await store.commit(resumed,outcome==='settled'?'original':'recovered');
+ }finally{await rm(dir,{recursive:true,force:true});}}
+});
+
+test('proven unsent rebuild failures do not consume a lifetime feedback retry and remain isolated after restart',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'direct-unsent-rebuild-'));try{
+  let store=new DirectSessions(dir);await store.load();const first=await store.prepare('native-A','a'.repeat(64),request,'first');await store.commit(first,'original');
+  const input={...request,messages:[...request.messages,{role:'user',content:'Continue actual work'}]},next=await store.prepare('native-A','a'.repeat(64),input,'delta',false,undefined,true);
+  const recovery=await store.fallback(next,input,'recovery');await store.markRebuild(recovery);await store.fail(recovery,false,false,'Open Copilot in the bridge-owned auxiliary workbook tab');
+  assert.equal(store.list()[0].state,'ready');store=new DirectSessions(dir);await store.load();
+  for(let i=0;i<3;i++){const retry=await store.prepare('native-A','a'.repeat(64),{...input,max_tokens:100+i},'retry-'+i,false,undefined,true);assert.equal(retry.isolatedRecovery,true);assert.equal(retry.epoch,2);assert.equal(retry.plan.kind,'bootstrap');await store.markRebuild(retry);await store.fail(retry,false,false,'Pane still preparing');}
+  const final=await store.prepare('native-A','a'.repeat(64),input,'final',false,undefined,true);await store.markRebuild(final);await store.commit(final,'recovered');assert.equal(store.list()[0].state,'ready');assert.equal(store.list()[0].epoch,2);
+ }finally{await rm(dir,{recursive:true,force:true});}
+});
+
+test('unknown rebuild delivery retains its actual failure instead of an exhausted-attempt error',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'direct-unknown-rebuild-'));try{
+  const store=new DirectSessions(dir);await store.load();const frame=await store.prepare('native-A','a'.repeat(64),request,'first',false,undefined,true),recovery=await store.fallback(frame,request,'recovery');await store.markRebuild(recovery);await store.fail(recovery,true,false,'Connection dropped after possible submission');
+  await assert.rejects(store.prepare('native-A','a'.repeat(64),{...request,max_tokens:32},'retry',false,undefined,true),/uncertain[\s\S]*Connection dropped after possible submission/);
+ }finally{await rm(dir,{recursive:true,force:true});}
+});
+
+test('a correlated not-sent cancellation releases an isolated rebuild attempt without losing its committed history',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'direct-cancel-unsent-rebuild-'));try{
+  const store=new DirectSessions(dir);await store.load();const first=await store.prepare('native-A','a'.repeat(64),request,'first');await store.commit(first,'original');const input={...request,messages:[...request.messages,{role:'user',content:'Continue'}]},delta=await store.prepare('native-A','a'.repeat(64),input,'delta',false,undefined,true),recovery=await store.fallback(delta,input,'recovery');await store.markRebuild(recovery);await store.beginCancellation(recovery);await store.settleCancellation(recovery,cancellation(recovery,'unused',{outcome:'not_sent',inputComplete:false}));
+  assert.equal(store.list()[0].epoch,1);const retry=await store.prepare('native-A','a'.repeat(64),input,'retry',false,undefined,true);assert.equal(retry.isolatedRecovery,true);assert.equal(retry.plan.kind,'bootstrap');assert.equal(retry.epoch,2);await store.fail(retry,false);
+ }finally{await rm(dir,{recursive:true,force:true});}
+});
+
+test('explicit GPT selection isolates refused Claude history and model-scoped reset preserves other model leases',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'direct-gpt-selection-'));try{
+  const store=new DirectSessions(dir);await store.load();
+  const refused=await store.prepare('multi-model','a'.repeat(64),request,'opus-refused');await store.terminalFailure(refused,'Copilot refused external-client relay use');
+  const sonnet=await store.prepare('multi-model','a'.repeat(64),{...request,model:'copilot-sonnet-5.5'},'sonnet-incomplete');await store.fail(sonnet,true,false,'Copilot context transfer acknowledgment is malformed');
+  const gpt=await store.prepare('multi-model','a'.repeat(64),{...request,model:'copilot-gpt-6.1-sol'},'gpt-start');assert.equal(gpt.plan.kind,'bootstrap');assert.equal(gpt.epoch,1);
+  await store.reset('multi-model',undefined,'copilot-sonnet-5.5');
+  await assert.rejects(store.prepare('multi-model','a'.repeat(64),request,'opus-again'),/refused external-client/);
+  await assert.rejects(store.prepare('multi-model','a'.repeat(64),{...request,model:'copilot-gpt-6.1-sol'},'gpt-overlap'),/busy/);
+  await store.commit(gpt,'gpt-chat');
+  const resumed=await store.prepare('multi-model','a'.repeat(64),{...request,model:'copilot-gpt-6.1-sol',messages:[...request.messages,{role:'user',content:'Continue after actual local tools'}]},'gpt-next');assert.equal(resumed.plan.kind,'delta');assert.equal(resumed.conversationId,'gpt-chat');assert.equal(resumed.epoch,1);
+  assert.equal(store.list().find(r=>r.model==='copilot-sonnet-5.5')!.state,'ready');
+  await assert.rejects(store.reset('multi-model',undefined,'unknown'),/Invalid reset model/);
+ }finally{await rm(dir,{recursive:true,force:true});}
+});
+
 test('an incomplete bootstrap never borrows the previous chat history to resume a new chat',async()=>{
  const dir=await mkdtemp(join(tmpdir(),'direct-partial-bootstrap-'));try{
   const store=new DirectSessions(dir);await store.load();const first=await store.prepare('native-A','a'.repeat(64),request,'first');await store.commit(first,'chat-one');

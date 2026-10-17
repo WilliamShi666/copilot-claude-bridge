@@ -13,8 +13,8 @@ const malformed='```json\n{"content":[{"type":"tool_use","name":"Read","input":{
 const valid=JSON.stringify({content:[{type:'tool_use',name:'Read',input:{file_path:'once.txt'}}]});
 const delay=()=>new Promise(r=>setTimeout(r,10));
 async function until<T>(check:()=>T|undefined):Promise<T>{const end=Date.now()+5000;while(Date.now()<end){const value=check();if(value!==undefined)return value;await delay();}throw new Error('Correction event deadline');}
-async function fixture(){
- const dir=await mkdtemp(join(tmpdir(),'reply-correction-')),g=await startGateway({stateDir:dir,port:0,timeoutMs:5000,cancelTimeoutMs:1000});
+async function fixture(timeoutMs=5000){
+ const dir=await mkdtemp(join(tmpdir(),'reply-correction-')),g=await startGateway({stateDir:dir,port:0,timeoutMs,cancelTimeoutMs:1000});
  const origin='chrome-extension://'+'f'.repeat(32),{token}=await(await fetch(g.url+'/bridge/pair',{method:'POST',headers:{Origin:origin},body:JSON.stringify({code:g.pairCode})})).json() as any;
  let ws:WebSocket;const events:any[]=[],jobs:any[]=[];
  async function connect(){ws=new WebSocket(g.url.replace('http:','ws:')+'/bridge/socket',{origin});ws.on('message',d=>{const e=JSON.parse(String(d));events.push(e);if(e.type==='job')jobs.push(e);});await new Promise<void>(r=>ws.once('open',r));ws.send(JSON.stringify({type:'hello',token,workerId:'format-test',ready:true,conversationControl:true,conversationResumability:'active-chat-only',sessionSyncVersion:1,auxiliaryLanes:true,cancelContinuation:1,agentContexts:1,imageInput:1}));await next('connected');}
@@ -57,16 +57,33 @@ test('commentary cannot authorize a suffix with an invalid or unavailable tool',
 
 test('a canonical refusal delivered as a raw result remains terminal even before a structured suffix',async()=>{const f=await fixture();try{const p=f.send(),job=await f.next('job');f.reply(job,'Copilot refused external-client relay use\n'+valid);assert.equal((await p).status,400);const retry=await f.send({...base,max_tokens:2000});assert.equal(retry.status,400);assert.match(await retry.text(),/refused external-client relay/);assert.equal(f.jobs.length,1);}finally{await f.close();}});
 
-for(const failure of ['second-invalid','invalid-tool','refusal','chat-lost'] as const)test('correction stops without a third inference on '+failure,async()=>{
+for(const failure of ['invalid-tool','refusal','chat-lost'] as const)test('correction stops without a third inference on '+failure,async()=>{
  const f=await fixture();try{
   const p=f.send(),first=await f.next('job');f.reply(first,malformed);const correction=await f.next('job');
   if(failure==='refusal')f.emit({type:'failure',id:correction.id,code:'provider_refusal',error:'Copilot refused external-client relay use',submitted:true});
   else if(failure==='chat-lost')f.emit({type:'failure',id:correction.id,code:'conversation_unavailable',error:'Chat switched',submitted:false});
-  else f.reply(correction,failure==='second-invalid'?malformed:'{"content":[{"type":"tool_use","name":"Read","input":{"file_path":12}}]}');
+  else f.reply(correction,'{"content":[{"type":"tool_use","name":"Read","input":{"file_path":12}}]}');
   const r=await p;assert.equal(r.status,failure==='refusal'?400:502);assert.equal(f.jobs.length,2);const retry=await f.send({...base,max_tokens:2000});assert.equal(retry.status,failure==='refusal'?400:409);assert.equal(f.jobs.length,2);
   if(failure==='refusal')assert.match(await retry.text(),/refused external-client relay/);
  }finally{await f.close();}
 });
+
+for(const succeeds of [true,false])test('JSON correction uses its fifth attempt without replaying source or delivering earlier tools: '+succeeds,async()=>{
+ const f=await fixture();try{
+  let delivered=false;const pending=f.send().then(r=>{delivered=true;return r;}),first=await f.next('job');f.reply(first,malformed);
+  for(let i=1;i<=5;i++){const correction=await f.next('job');assert.equal(delivered,false);assert.equal(correction.conversation.id,first.conversation.id);assert.equal(correction.modelLabel,first.modelLabel);assert.ok(!correction.prompt.includes('PRIVATE_TASK_ONCE'));f.reply(correction,succeeds&&i===5?valid:malformed);}
+  const response=await pending;assert.equal(response.status,succeeds?200:502);const text=await response.text();assert.match(text,/5/);if(succeeds)assert.equal(JSON.parse(text).content.filter((b:any)=>b.type==='tool_use').length,1);else assert.match(text,/JSON[\s\S]*5[\s\S]*failure/i);assert.equal(f.jobs.length,6);
+ }finally{await f.close();}
+});
+
+test('a JSON correction keeps the original inference deadline instead of receiving another full timeout',async()=>{
+ const f=await fixture(1500);try{
+  const pending=f.send();void pending.catch(()=>{});const first=await f.next('job');await new Promise(r=>setTimeout(r,1100));f.reply(first,malformed);await f.next('job');
+  const status=await Promise.race([pending.then(r=>r.status),new Promise(r=>setTimeout(()=>r('deadline was renewed'),800))]);assert.equal(status,504);assert.equal(f.jobs.length,2);
+ }finally{await f.close();}
+});
+
+for(const repairs of [5,6])test('ACK diagnostics match the per-transfer correction budget: '+repairs,async()=>{const f=await fixture();try{const pending=f.send(),job=await f.next('job');f.reply(job,valid,{contextAckRepairs:repairs,contextAckRepairChars:repairs*400});assert.equal((await pending).status,repairs===5?200:502);}finally{await f.close();}});
 
 for(const kind of ['missing-proof','wrong-proof','invalid-schema','plain-refusal'] as const)test('no format inference without verified syntactic-format evidence: '+kind,async()=>{
  const f=await fixture();try{

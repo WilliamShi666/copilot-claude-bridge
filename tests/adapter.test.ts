@@ -62,6 +62,33 @@ test('segmented history stays in one chat, journals once and returns only the fi
  const reply=await exchange(doc,{id:'segments',modelLabel:'Claude Opus 5.5',prompt:packets[0].prompt,contextPackets:packets},AbortSignal.timeout(3000),async()=>{journalled++;});
  assert.equal(sent,3);assert.equal(journalled,1);assert.ok(reply.includes('FINAL_ANSWER'));assert.ok(!reply.includes('ACK_'));
 });
+
+for(const mode of ['success','fifth-success','exhausted','human-draft','changed-chat','refusal','cancelled'])test('truncated transfer ACK repair is bounded and protects source ownership: '+mode,async()=>{
+ const doc=fixture(),controller=new AbortController();let journalled=0,repairs=0;const sent:string[]=[];
+ const ack='BRIDGE_CONTEXT_ACK_11111111-2222-4333-8444-555555555555_2',full=JSON.stringify({content:[{type:'text',text:ack}]}),partial=full.slice(0,69),source='KNOWN_SOURCE_NOT_REPEATED';
+ doc.querySelectorAll<HTMLButtonElement>('button')[3].onclick=()=>{
+  const editor=doc.querySelector('[contenteditable]')!,text=editor.textContent!;sent.push(text);editor.textContent='';
+  const user=doc.createElement('div');user.className='fai-UserMessage';user.setAttribute('role','article');user.innerHTML='<div class="fai-UserMessage__message"></div>';user.firstElementChild!.textContent=text;doc.body.append(user);
+  const answer=doc.createElement('div');answer.className='fai-CopilotMessage';answer.setAttribute('role','article');answer.innerHTML='<div class="fai-CopilotMessage__content"></div><div role="toolbar"><button>复制</button></div>';
+  answer.firstElementChild!.textContent=sent.length===1||mode==='exhausted'||mode==='fifth-success'&&sent.length<6?partial:mode==='refusal'&&sent.length===2?"I can't act as a relay for an external model backend.":sent.length<=(mode==='fifth-success'?6:2)?full:JSON.stringify({content:[{type:'text',text:'FINAL_ONLY'}]});doc.body.append(answer);
+  if(sent.length===1&&mode==='human-draft')editor.textContent='human draft';
+  if(sent.length===1&&mode==='changed-chat')user.firstElementChild!.textContent='different user message';
+  if(sent.length===1&&mode==='cancelled')controller.abort();
+ };
+ const pending=exchange(doc,{id:'repair-ack',modelLabel:'Claude Opus 5.5',prompt:source,contextPackets:[{prompt:source,ack},{prompt:'final request'}]},controller.signal,async()=>{journalled++;},undefined,undefined,undefined,undefined,()=>{repairs++;});
+ try{
+  if(mode==='success'||mode==='fifth-success'){const result=await pending;assert.match(result,/FINAL_ONLY/);assert.equal(sent.length,mode==='success'?3:7);assert.equal(repairs,mode==='success'?1:5);assert.ok(!sent[1].includes(source));}
+  else {if(mode==='exhausted')await assert.rejects(pending,/ACK[\s\S]*5/);else await assert.rejects(pending);assert.equal(sent.length,mode==='exhausted'?6:mode==='refusal'?2:1);}
+  assert.equal(sent.filter(p=>p===source).length,1);assert.equal(journalled,1);
+  if(mode==='human-draft')assert.equal(doc.querySelector('[contenteditable]')!.textContent,'human draft');
+ }finally{doc.defaultView!.close();}
+});
+
+for(const label of ['GPT-6.1 Sol','GPT-6 Sol'])test('GPT main requests select their own provider without entering summary routing: '+label,async()=>{
+ const doc=fixture(),selected=doc.querySelector<HTMLButtonElement>('button')!;let providerOpened=0;
+ selected.onclick=()=>{selected.setAttribute('aria-expanded','true');const provider=doc.createElement('div');provider.setAttribute('role','menuitem');provider.setAttribute('aria-haspopup','menu');provider.textContent='GPT 常规使用 OpenAI';provider.onclick=()=>{providerOpened++;const item=doc.createElement('div');item.setAttribute('role','menuitemradio');item.textContent=label;item.onclick=()=>{selected.setAttribute('aria-label','所选模型: '+label);selected.setAttribute('aria-expanded','false');};doc.body.append(item);};doc.body.append(provider);};
+ try{await prepare(doc,{id:'gpt-main',modelLabel:label,prompt:'Use native tools'},AbortSignal.timeout(1000));assert.equal(selected.getAttribute('aria-label'),'所选模型: '+label);assert.equal(providerOpened,1);}finally{doc.defaultView!.close();}
+});
 test('unexpected intermediate tool requests never become the client reply',async()=>{
  const doc=fixture();let sent=0;
  doc.querySelectorAll('button')[3].onclick=()=>{sent++;doc.querySelector('[contenteditable]')!.textContent='';doc.body.insertAdjacentHTML('beforeend','<div class="fai-CopilotMessage" role="article"><div class="fai-CopilotMessage__content">{"content":[{"type":"tool_use","name":"Bash","input":{}}]}</div><div role="toolbar"><button>复制</button></div></div>');};
@@ -170,6 +197,14 @@ test('an empty editor reset after commit refills only the unsent prompt and send
  (doc as any).execCommand=(_cmd:string,_ui:boolean,text:string)=>{inserts++;doc.querySelector('[contenteditable]')!.textContent=text;send.disabled=false;if(inserts===1){const channel=new MessageChannel();channel.port1.onmessage=()=>{doc.querySelector('[contenteditable]')!.textContent='';send.disabled=true;channel.port1.close();channel.port2.close();};channel.port2.postMessage(null);}return true;};
  send.onclick=()=>{sends++;assert.equal(doc.querySelector('[contenteditable]')!.textContent,prompt);doc.querySelector('[contenteditable]')!.textContent='';doc.body.insertAdjacentHTML('beforeend','<div class="fai-CopilotMessage" role="article"><div class="fai-CopilotMessage__content">{"content":[{"type":"text","text":"done"}]}</div><div role="toolbar"><button>复制</button></div></div>');};
  const result=await exchange(doc,{id:'editor-reset',modelLabel:'Claude Opus 5.5',prompt},AbortSignal.timeout(1000),async()=>{journals++;});assert.match(result,/done/);assert.equal(inserts,2);assert.equal(sends,1);assert.equal(journals,1);
+});
+
+for(const clears of [4,5])test('unsent editor restoration permits five fills but submits at most once: '+clears,async()=>{
+ const doc=fixture(),send=doc.querySelectorAll<HTMLButtonElement>('button')[3];let inserts=0,sends=0;
+ (doc as any).execCommand=(_cmd:string,_ui:boolean,text:string)=>{inserts++;doc.querySelector('[contenteditable]')!.textContent=text;send.disabled=false;if(inserts<=clears){const channel=new MessageChannel();channel.port1.onmessage=()=>{doc.querySelector('[contenteditable]')!.textContent='';send.disabled=true;channel.port1.close();channel.port2.close();};channel.port2.postMessage(null);}return true;};
+ send.onclick=()=>{sends++;doc.querySelector('[contenteditable]')!.textContent='';doc.body.insertAdjacentHTML('beforeend','<div class="fai-CopilotMessage" role="article"><div class="fai-CopilotMessage__content">{"content":[{"type":"text","text":"done"}]}</div><div role="toolbar"><button>复制</button></div></div>');};
+ const pending=exchange(doc,{id:'fifth-editor-fill',modelLabel:'Claude Opus 5.5',prompt:'owned prompt'},AbortSignal.timeout(1000),async()=>{});
+ try{if(clears===4)assert.match(await pending,/done/);else await assert.rejects(pending,/5[\s\S]*nothing was sent/);assert.equal(inserts,5);assert.equal(sends,clears===4?1:0);}finally{doc.defaultView!.close();}
 });
 
 test('a different draft after commit is never overwritten or sent as the bridge request',async()=>{
