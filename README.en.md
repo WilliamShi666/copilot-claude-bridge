@@ -33,7 +33,13 @@ Eligible commercial Microsoft Copilot subscriptions also provide model selection
 - Ordered long-context transfer, native compaction hooks and explicit recovery after uncertain delivery.
 - An optional mode that keeps your original inference provider and adds Copilot as a planning/review advisor.
 
-Model labels currently targeted by the adapter are Opus 5.5 and Sonnet 5.5. Your Excel account must expose these labels, and both GPT summary models are needed to use the complete fallback chain. Read the [tested scope](docs/public/validation.md) and [limitations](docs/public/limitations.md).
+Main models are Opus 5.5, Sonnet 5.5, GPT-6.1 Sol and GPT-6 Sol, using launcher aliases `opus`, `sonnet`, `gpt61` and `gpt6`. Your Excel account must expose the selected label. Summary routing remains independently GPT-6.1 Sol → GPT-6 Sol. Read the [tested scope](docs/public/validation.md) and [limitations](docs/public/limitations.md).
+
+**GPT main models are experimental, with failed tool acceptance:** GPT-6.1 Sol in native WSL and GPT-6 Sol in native Windows both declined local Write/Read requests. In a separate empty workbook, both also declined the external-client integration in Allow editing mode. Model selection and text responses do not establish Claude Code tool compatibility. GPT is not a verified refusal fallback; the normal default remains Claude in Chat-only mode.
+
+Restart the native client after updating to expose `copilot-gpt-6.1-sol` and `copilot-gpt-6-sol` in `/model`. To resume an existing task with GPT, use `bash ./start-copilot.sh /mnt/d/my-project --model gpt61 --resume <native-session-id>` (or the Windows launcher). Each model has its own context and browser chat. Explicit selection preserves native text and actual tool results; it does not undo tools or clear the previous model's refusal. There is no automatic main-model switch after refusal, and GPT may also refuse. Starting with the chosen model also sets that process's default auxiliary model.
+
+Historical assistant `thinking` and `redacted_thinking` blocks are excluded only from the transport copy, without interpreting signatures or editing native transcripts. A truncated prefix of the exact expected transfer ACK can receive up to five short, same-chat corrections per complete transfer, only with verified source/page ownership and no draft. Source data is not replayed; wrong ACKs, tools, prose, refusal or budget exhaustion stop. Diagnostic metadata records repair count and extra prompt characters. `context-reset --session <id> --model sonnet` can explicitly reset only one model while retaining other model contexts and refusal records.
 
 ## Quick start: Windows + Chrome
 
@@ -96,11 +102,15 @@ Keep Chrome, the paired workbook and Copilot open. Do not manually switch that c
 
 After a native interruption, the bridge stops the matching browser generation and waits up to 15 seconds for a correlated cancellation receipt. New feedback waits for confirmation. A verified original page continues in the same chat and epoch using a recovery delta; unchanged system instructions and tool schemas are not resent. Cancelled browser tool calls are discarded. Actual local tool results remain authoritative.
 
-If the original chat is closed, changed, has a new draft, or cannot be verified, each feedback request gets at most one complete rebuild in a new bridge-owned workbook tab. The old page and draft are preserved, and the response visibly reports full synchronization. Ordinary feedback after completion continues incrementally. Real compaction and substantive history changes still require complete synchronization.
+Claude Code may withdraw the cancelled standalone text prompt before sending new feedback. This is supported only with its recorded text-tail proof and an unchanged earlier history. Tool results cannot be replaced; reminder-only changes do not trigger recovery. Older records without that proof remain protected.
+
+If the original chat is closed, changed, has a new draft, or cannot be verified, recovery uses an isolated bridge-owned workbook tab and reports full synchronization on success. A preparation failure proven not submitted does not exhaust a business-recovery allowance or permanently block the feedback: a subsequent request reuses the preparing recovery tab. Existing timeout and cancellation still apply. Sent or uncertain requests are not blindly rebuilt again. The old page and draft remain intact. Ordinary feedback after completion continues incrementally; compaction and substantive history changes require complete synchronization.
+
+Verified syntactic JSON failures allow up to five same-chat, same-model corrections within the original inference deadline. Truncated exact-prefix ACKs allow up to five short corrections per complete context transfer, without replaying source packets. An empty editor reset allows up to five unsent input restorations, followed by at most one submit. Budgets are local to each request, not cumulative across sessions. Exhaustion preserves the phase, actual count and cause; refusal, changed drafts, invalid tools and uncertain delivery stop instead of consuming more retries.
 
 A clear upstream refusal is a separate, nonretryable error. It never triggers another chat or model attempt, and a retry changing only `max_tokens` retains the original reason. `context-reset` does not resolve a provider refusal.
 
-A completed, verified native reply with invalid JSON syntax can get one format-only correction in the same chat and model. The bridge does not replay native history or execute the rejected tools. Corrected output still passes the original tool-schema checks, and successful correction is reported visibly. Refusals, unknown delivery, invalid tool arguments or a second malformed reply stop explicitly. See [context behavior](docs/public/context.md).
+A completed, verified native reply with invalid JSON syntax can get up to five format-only corrections in the same chat and model, sharing the original inference deadline. The bridge does not replay native history or execute rejected tools. Corrected output passes the original tool-schema checks and reports the actual count. Refusals, unknown delivery, invalid arguments or exhausted corrections stop with their cause. See [context behavior](docs/public/context.md).
 
 Update the gateway and extension together, reload the extension, and refresh the workbook. `doctor` must show `capabilities.cancelContinuation: 1`; launch commands are unchanged.
 
@@ -138,7 +148,7 @@ Image input requires Chrome 125+ and the optional image build: run `npm run buil
 
 Image interpretation uses Copilot's built-in attachment/vision capability. It does not automatically run local OCR or an external vision service; restrictions on all visual analysis can prevent viewing. Attachment verification does not certify the answer or identify Copilot's internal vision model.
 
-This UI transport supports text and base64 image attachments with buffered responses, local token estimates and no measured provider billing. UI changes, account limits, policy refusals and malformed replies can interrupt tasks. PNG/JPEG/GIF/WebP images from native Read or user messages are sent as actual Copilot attachments, with stable references in text history. Limits are 5 MB per image, 10 MB of unique image data in a request and five attachments per browser turn. Remote image URLs, audio, video, signed thinking, exact API caching and arbitrary long-running/subagent flows are not supported or guaranteed. See [limitations](docs/public/limitations.md).
+This UI transport supports text and base64 image attachments with buffered responses, local token estimates and no measured provider billing. UI changes, account limits, policy refusals and malformed replies can interrupt tasks. PNG/JPEG/GIF/WebP images from native Read or user messages are sent as actual Copilot attachments, with stable references in text history. Limits are 5 MB per image, 10 MB of unique image data in a request and five attachments per browser turn. Remote image URLs, audio, video, signed-reasoning transfer, exact API caching and arbitrary long-running/subagent flows are not supported or guaranteed. Historical assistant reasoning is omitted rather than transmitted. See [limitations](docs/public/limitations.md).
 
 ```powershell
 npm.cmd run typecheck

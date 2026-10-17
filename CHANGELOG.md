@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Release recovery attempt markers only after proven unsent preparation failures, reuse the preparing owned page, and preserve real unknown-delivery causes instead of masking them with attempt-limit errors.
+- Retire stale recovery routing when rebinding or pairing, including when a previous recovery page becomes the selected main page; keep the pages and drafts intact.
+- Continue after native clients withdraw a cancelled standalone text prompt, while requiring the earlier history and all actual tool results to remain intact.
+- Allow five same-chat JSON corrections, five ACK corrections per transfer and five unsent editor restorations, retaining the original inference deadline and at most one actual submit.
+- Accept mixed-provider resumed/forked histories by omitting historical assistant reasoning only from the browser transport copy, preserving native transcripts and tool records.
+- Add explicit GPT-6.1 Sol and GPT-6 Sol main-model selection, independent model context/refusal state and model-scoped context reset.
+- Document failed GPT local Write/Read acceptance in both Chat-only and an isolated Allow editing experiment; retain the existing default mode and no automatic main-model fallback.
+- Correct a verified truncated transfer acknowledgment once in the same chat without replaying source data, and record bounded correction diagnostics.
+
 - Apply image-input focus emulation to nested Office iframe targets, and distinguish proven pre-Enter failures from unknown delivery without discarding native context or image-summary evidence.
 - Accept reordered inline attachment references only when their unique filename set exactly matches the expected images; permit one explicit same-chat format correction for commentary preceding a validated structured suffix.
 
