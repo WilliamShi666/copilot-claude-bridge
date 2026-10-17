@@ -4,6 +4,7 @@ async function until(condition:()=>boolean){const deadline=Date.now()+1500;while
 async function boot(deferred=false,cancelReplyMissing=false,cancelContinuation=false,trustedImages=false,debuggerGranted=true,actualInspection?:any,fastAckTimeout=false){
  const url='https://excel.cloud.microsoft/open/onedrive/?docId=approved';const storage:any={imageInputEnabled:trustedImages,config:{url:'http://127.0.0.1:59173',token:'a'.repeat(64),workerId:'test',tabId:7,frameId:2,ready:true,conversationControl:true}};
  const receipts:any[]=[];const tabs=new Map([[7,url]]),jobs:any[]=[],activations:number[]=[],openCalls:number[]=[];let debuggerListener:any;let listener:any,socket:any,resolveCreate:any,nextTabId=20;const debuggerCalls:any[]=[];let imageProof=true,imageFocus=true,imageSubmitted=true;let rawAction=async()=>{},ackAction=async()=>{};
+ let preparationOffset=0,stallOwned=false;class FrameDate extends Date{static now(){return Date.now()+preparationOffset;}}
  const source='https://fa000000124.officeapps.live.com/taskpane.html';
  const emit=async(message:any,tabId:number,frameId:number,url=source)=>{listener(message,{tab:{id:tabId},frameId,url},()=>{});await flush();};
  const chromeMock:any={
@@ -18,11 +19,16 @@ async function boot(deferred=false,cancelReplyMissing=false,cancelContinuation=f
  chromeMock.tabs.update=async(id:number,properties:any)=>{assert.equal(properties.active,true);assert.ok(tabs.has(id));activations.push(id);return{id,url:tabs.get(id)};};
  chromeMock.windows={update:()=>{throw new Error('The browser window must not be focused');}};
  class Socket {static OPEN=1;static CONNECTING=0;readyState=1;sent:any[]=[];onopen:any;onmessage:any;constructor(){socket=this;}send(value:string){const v=JSON.parse(value);if(v.type==='cancel_receipt'){assert.deepEqual(storage['cancel:'+v.id],v);receipts.push(v);}this.sent.push(v);}close(){}}
- vm.runInNewContext(await readFile('dist/extension/background.js','utf8'),{chrome:chromeMock,WebSocket:Socket,URL,Date,Error,Promise,JSON,Map,Set,Number,setInterval:()=>1,setTimeout:(fn:any,ms:number)=>setTimeout(fn,fastAckTimeout&&ms===20000?5:ms),clearTimeout});await flush();await socket.onopen();await flush();
+ const originalSend=chromeMock.tabs.sendMessage;chromeMock.tabs.sendMessage=async(...args:any[])=>{if(stallOwned&&args[1].type==='office-open-copilot'){preparationOffset+=60001;throw new Error('Copilot pane is still loading');}return originalSend(...args);};
+ vm.runInNewContext(await readFile('dist/extension/background.js','utf8'),{chrome:chromeMock,WebSocket:Socket,URL,Date:FrameDate,Error,Promise,JSON,Map,Set,Number,setInterval:()=>1,setTimeout:(fn:any,ms:number)=>setTimeout(fn,fastAckTimeout&&ms===20000?5:ms),clearTimeout});await flush();await socket.onopen();await flush();
  const server=async(value:any)=>{socket.onmessage({data:JSON.stringify(value)});await flush();};
  const request=(message:any,tabId=7,frameId=2)=>new Promise<any>(resolve=>listener(message,{tab:{id:tabId},frameId,documentId:'current-document',url:source},resolve));
- return {socket,jobs,tabs,server,emit,request,debuggerCalls,setImageProof:(value:boolean)=>{imageProof=value;},setImageFocus:(value:boolean)=>{imageFocus=value;},setImageSubmitted:(value:boolean)=>{imageSubmitted=value;},onRawDown:(fn:()=>Promise<void>)=>{rawAction=fn;},onAck:(fn:()=>Promise<void>)=>{ackAction=fn;},activations,openCalls,storage,receipts,release:async()=>{resolveCreate();await flush();}};
+ return {socket,jobs,tabs,server,emit,request,ui:(message:any)=>new Promise<any>(resolve=>listener(message,{id:'extension'},resolve)),debuggerCalls,stallOwned:(value:boolean)=>{stallOwned=value;},setImageProof:(value:boolean)=>{imageProof=value;},setImageFocus:(value:boolean)=>{imageFocus=value;},setImageSubmitted:(value:boolean)=>{imageSubmitted=value;},onRawDown:(fn:()=>Promise<void>)=>{rawAction=fn;},onAck:(fn:()=>Promise<void>)=>{ackAction=fn;},activations,openCalls,storage,receipts,release:async()=>{resolveCreate();await flush();}};
 }
+
+test('rebinding retires an old recovery reference even when selecting that recovery tab as the new main page',async()=>{
+ for(const target of [7,20]){const f=await boot(false,false,true),url=f.tabs.get(7)!;f.tabs.set(20,url);f.storage.config.recovery={tabId:20,sourceUrl:url,documentKey:'a'.repeat(64),frameId:4,ready:true};const answer=await f.ui({type:'rebind-tab',tabId:target});assert.equal(answer.error,undefined);assert.equal(f.storage.config.tabId,target);assert.equal(f.storage.config.recovery,undefined);assert.ok(f.tabs.has(7));assert.ok(f.tabs.has(20));assert.equal(f.jobs.length,0);}
+});
 test('worker routes main/auxiliary frames separately and becomes ready even when ACK precedes frame completion',async()=>{
  const f=await boot();assert.deepEqual(f.activations,[]);await f.server({type:'job',id:'main-1',lane:'main',prompt:'main'});assert.equal(f.jobs[0].tabId,7);assert.deepEqual(f.activations,[7]);
  await f.emit({type:'result',id:'main-1',text:'real reply'},7,2);await f.server({type:'ack',id:'main-1'});
@@ -101,6 +107,16 @@ test('confirmed cancellation uses the original frame, persists before sending an
 test('an isolated main rebuild preserves the original workbook tab and moves only bridge routing',async()=>{
  const f=await boot(false,false,true);await f.server({type:'job',id:'recovery',lane:'main',isolatedRecovery:true,cancelContinuation:1,prompt:'complete native history'});await until(()=>f.jobs.length===1);
  assert.ok(f.tabs.has(7),'old page and its drafts must remain');assert.equal(f.jobs[0].tabId,20);assert.equal(f.storage.config.tabId,20);assert.equal(f.storage.config.recovery,undefined);
+});
+
+test('recovery preparation timeout is unsent and a retry reuses its owned tab without touching the main page',async()=>{
+ const f=await boot(false,false,true);f.stallOwned(true);
+ await f.server({type:'job',id:'cold-recovery',lane:'main',isolatedRecovery:true,cancelContinuation:1,prompt:'must remain unsent'});
+ await until(()=>f.socket.sent.some((e:any)=>e.type==='failure'&&e.id==='cold-recovery'));
+ const failure=f.socket.sent.find((e:any)=>e.type==='failure'&&e.id==='cold-recovery');
+ assert.equal(failure.submitted,false);assert.match(failure.error,/auxiliary workbook/);assert.equal(f.jobs.length,0);assert.equal(f.storage.config.tabId,7);assert.equal(f.storage.config.recovery.tabId,20);
+ f.stallOwned(false);await f.server({type:'job',id:'warm-recovery',lane:'main',isolatedRecovery:true,cancelContinuation:1,prompt:'explicit retry'});await until(()=>f.jobs.length===1);
+ assert.equal(f.jobs[0].tabId,20);assert.equal(f.tabs.size,2);assert.ok(f.tabs.has(7));assert.equal(f.storage.config.tabId,20);
 });
 
 test('cancelling recovery during tab creation prevents later submission even after cancellation ACK',async()=>{

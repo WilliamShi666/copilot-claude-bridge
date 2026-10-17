@@ -19,7 +19,7 @@ export function parseArguments(input,cwd=process.cwd()){
   if(arg==='--gateway-only'){gatewayOnly=true;continue;}
   if(arg==='--model'||arg==='--compact-window'){
    const value=args.shift();if(!value||value.startsWith('--'))throw Error('Value required: '+arg);
-   if(arg==='--model'&&!['opus','sonnet'].includes(value))throw Error('Model must be opus or sonnet');
+   if(arg==='--model'&&!['opus','sonnet','gpt61','gpt6','copilot-opus-5.5','copilot-sonnet-5.5','copilot-gpt-6.1-sol','copilot-gpt-6-sol'].includes(value))throw Error('Model must be opus, sonnet, gpt61, gpt6, or a supported copilot deployment ID');
    if(arg==='--compact-window'&&!/^(?:\d+)(?:k|m)?$/i.test(value))throw Error('Use --compact-window <tokens>, for example 533k');
    bridgeArgs.push(arg,value);continue;
   }
@@ -91,7 +91,7 @@ export async function waitForChrome(current,{inspect,sleep=delay,attempts=35}){
 }
 
 export async function main(input=process.argv.slice(2)){
- if(input.includes('--help')){console.log('Usage: node scripts/run-copilot.mjs [workspace] [--gateway-only | --check] [--model opus|sonnet] [--compact-window 533k] [-- <Claude flags>]\nDefault: current workspace, in-process teammates, native Auto Mode. No permission bypass.');return;}
+ if(input.includes('--help')){console.log('Usage: node scripts/run-copilot.mjs [workspace] [--gateway-only | --check] [--model opus|sonnet|gpt61|gpt6] [--compact-window 533k] [-- <Claude flags>]\nDefault: current workspace, in-process teammates, native Auto Mode. No permission bypass.');return;}
  if(!['win32','linux'].includes(process.platform))throw Error('This launcher supports Windows and Linux/WSL.');
  const options=parseArguments(input),state=resolve(process.env.M365_BRIDGE_STATE_DIR??join(homedir(),'.m365-claude-bridge'));
  try{await access(cli);}catch(e){if(e.code==='ENOENT')throw Error('Bridge is not built. In the repository root run npm ci and npm run build.');throw e;}

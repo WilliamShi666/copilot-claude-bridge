@@ -2,6 +2,7 @@
 import type { ConversationCommand,ConversationReceipt,BrowserLane } from '../protocol/conversation.js';
 import {TransportFailure,refusalKind,type CancelReceipt} from '../protocol/cancellation.js';
 import type {ContextPacket} from '../protocol/transfer.js';
+import {AUTOMATIC_RETRY_LIMIT,validateContextAck,ContextAckFormatError,repairableContextAck,contextAckRepairPrompt} from '../protocol/transfer.js';
 import type {BrowserImage} from '../protocol/images.js';
 import {runSummaryChain,providerRestriction,type SummaryAttempt} from '../protocol/summary.js';
 import {ImageInputFailure} from './image-input.js';
@@ -292,14 +293,14 @@ export async function fill(doc: Document, prompt: string, signal: AbortSignal = 
     catch (failure) { if (signal.aborted) throw failure; throw new Error(`Copilot input was altered or truncated; message was not sent (expected ${wirePrompt.length} characters, read ${read().length})`); }
   }
 }
-export async function exchange(doc:Document,job:BrowserJob,signal:AbortSignal,beforeSend:()=>Promise<void>,onSummary:(model:string,attempts:SummaryAttempt[])=>void=()=>{},onAttempt:(attempt:SummaryAttempt)=>void=()=>{},turn?:TurnObservation,submitImage?:(modelLabel:string)=>Promise<void>):Promise<string>{
+export async function exchange(doc:Document,job:BrowserJob,signal:AbortSignal,beforeSend:()=>Promise<void>,onSummary:(model:string,attempts:SummaryAttempt[])=>void=()=>{},onAttempt:(attempt:SummaryAttempt)=>void=()=>{},turn?:TurnObservation,submitImage?:(modelLabel:string)=>Promise<void>,onAckRepair:(chars:number)=>void=()=>{}):Promise<string>{
  if(job.images?.length&&!submitImage)throw new Error('Image input requires the optional trusted browser input channel');
- if(!job.summary)return exchangeAttempt(doc,job,signal,beforeSend,()=>{},turn,submitImage);
+ if(!job.summary)return exchangeAttempt(doc,job,signal,beforeSend,()=>{},turn,submitImage,onAckRepair);
  if(job.conversation)throw new Error('Summary inference requires a fresh auxiliary conversation');
  let lastPrompt:string|undefined,submitted=false,journalled=false;
  const result=await runSummaryChain(async model=>{
   lastPrompt=undefined;submitted=false;
-  return exchangeAttempt(doc,{...job,modelLabel:model},signal,async()=>{submitted=true;if(!journalled){await beforeSend();journalled=true;}},prompt=>{lastPrompt=prompt;},turn,submitImage);
+  return exchangeAttempt(doc,{...job,modelLabel:model},signal,async()=>{submitted=true;if(!journalled){await beforeSend();journalled=true;}},prompt=>{lastPrompt=prompt;},turn,submitImage,onAckRepair);
  },async()=>{
   if(submitted)stop(doc);
   await until(doc,()=>!button(doc,/^(停止生成|Stop generating)/i),signal);
@@ -308,21 +309,29 @@ export async function exchange(doc:Document,job:BrowserJob,signal:AbortSignal,be
  },signal,onAttempt,error=>!(error instanceof ImageInputFailure));
  onSummary(result.model,result.attempts);return result.text;
 }
-async function exchangeAttempt(doc: Document, job: BrowserJob, signal: AbortSignal, beforeSend: () => Promise<void>,onPrompt:(prompt:string)=>void=()=>{},turn?:TurnObservation,submitImage?:(modelLabel:string)=>Promise<void>): Promise<string> {
+async function exchangeAttempt(doc: Document, job: BrowserJob, signal: AbortSignal, beforeSend: () => Promise<void>,onPrompt:(prompt:string)=>void=()=>{},turn?:TurnObservation,submitImage?:(modelLabel:string)=>Promise<void>,onAckRepair:(chars:number)=>void=()=>{}): Promise<string> {
   await prepare(doc, job, signal);
   if(!job.contextPackets)return exchangeOne(doc,job,job.prompt,signal,beforeSend,onPrompt,turn,true,submitImage);
   const packets=job.contextPackets;
   if(packets.length<2||packets.length>32||packets.some((p,i)=>typeof p.prompt!=='string'||p.prompt.length>350000||(i<packets.length-1?typeof p.ack!=='string':p.ack!==undefined)))throw new Error('Invalid segmented context transfer');
-  let cursor:string|undefined,journalled=false,reply='';
+  let cursor:string|undefined,journalled=false,reply='',ackRepairs=0;const transferTurn=turn??observeTurn(doc);
   for(const packet of packets){
     signal.throwIfAborted();
     if(cursor&&!await matchesConversation(doc,cursor))throw new Error('Copilot conversation changed during context transfer');
     if(draftText(doc))throw new Error('A draft appeared during context transfer; it was not overwritten');
-    reply=await exchangeOne(doc,job,packet.prompt,signal,async()=>{if(!journalled){await beforeSend();journalled=true;}},onPrompt,turn,packet.ack===undefined,submitImage);
+    reply=await exchangeOne(doc,job,packet.prompt,signal,async()=>{if(!journalled){await beforeSend();journalled=true;}},onPrompt,transferTurn,packet.ack===undefined,submitImage);
     if(packet.ack){
-      const clean=reply.trim().replace(/^```(?:json)?\s*([\s\S]*?)\s*```$/,'$1');let value:any;
-      try{value=JSON.parse(clean);}catch{throw new Error('Copilot context transfer acknowledgment is malformed');}
-      if(Object.keys(value??{}).join(',')!=='content'||!Array.isArray(value.content)||value.content.length!==1||value.content[0].type!=='text'||value.content[0].text!==packet.ack||Object.keys(value.content[0]).sort().join(',')!=='text,type')throw new Error('Copilot did not acknowledge the exact context fragment; intermediate tools were not forwarded');
+      for(;;){try{validateContextAck(reply,packet.ack);break;}catch(error){
+        if(!(error instanceof ContextAckFormatError)||!repairableContextAck(reply,packet.ack))throw error;
+        if(ackRepairs>=AUTOMATIC_RETRY_LIMIT)throw new Error('Copilot context ACK correction failed after '+ackRepairs+' attempts. Last failure: '+error.message);
+        signal.throwIfAborted();
+        if(!ownsTurn(doc,transferTurn)||draftText(doc))throw new Error('Context fragment ownership or draft changed before acknowledgment repair; nothing was repeated');
+        const originalPage=pageInstance(doc),originalEvidence=evidenceV2(doc),repair=contextAckRepairPrompt(packet.ack);
+        ackRepairs++;onAckRepair(repair.length);
+        reply=await exchangeOne(doc,job,repair,signal,async()=>{
+          signal.throwIfAborted();if(pageInstance(doc)!==originalPage||evidenceV2(doc)!==originalEvidence)throw new Error('Conversation changed before acknowledgment repair; nothing was repeated');
+        },onPrompt,transferTurn,false);
+      }}
       cursor=await conversationCursor(doc);
     }
   }
@@ -337,7 +346,7 @@ async function exchangeOne(doc:Document,job:BrowserJob,prompt:string,signal:Abor
   const assertContext=()=>{if(users()!==baseUsers||assistants()!==baseAssistants||baseEvidence&&conversationEvidence(doc)!==baseEvidence)throw new Error('Copilot conversation changed before submission; nothing was sent');};
   const assertMode=()=>{const model=modelButton(doc);if(!isChatOnly(doc)||!model||!label(model).includes(job.modelLabel))throw new Error('Mode or model changed before submission');};
   let send:HTMLElement|undefined;
-  for(let attempt=0;attempt<3;attempt++){
+  for(let attempt=0;attempt<AUTOMATIC_RETRY_LIMIT;attempt++){
     signal.throwIfAborted();const existing=editorText(doc);if(existing!==''&&existing!==wirePrompt)throw new Error('Copilot input changed after preparation; the draft was not overwritten');
     assertContext();assertMode();const latest=editorText(doc);if(latest!==''&&latest!==wirePrompt)throw new Error('Copilot input changed after preparation; the draft was not overwritten');await fill(doc,prompt,signal);await editorCommit(doc,signal);
     const state=await until<{kind:'cleared'|'changed'|'ready';control?:HTMLElement}>(doc,()=>{
@@ -347,7 +356,7 @@ async function exchangeOne(doc:Document,job:BrowserJob,prompt:string,signal:Abor
     if(state.kind==='changed')throw new Error('Copilot input changed after preparation; the draft was not overwritten');
     if(state.kind==='cleared')continue;send=state.control;break;
   }
-  if(!send)throw new Error('Copilot repeatedly cleared its editor before submission; nothing was sent');
+  if(!send)throw new Error('Copilot input restoration failed after '+AUTOMATIC_RETRY_LIMIT+' attempts; nothing was sent');
   assertContext();assertMode();
   const images=lastPacket?job.images??[]:[];
   if(images.length){await attachImages(doc,images,signal);await editorCommit(doc,signal);if(editorTextWithoutFiles(doc)!==normalize(wirePrompt))throw new Error('Copilot text changed during image upload; nothing was sent');}

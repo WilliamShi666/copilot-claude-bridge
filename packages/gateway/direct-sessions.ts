@@ -1,5 +1,5 @@
 import type {MessagesRequest} from '../protocol/index.js';
-import {BridgeError} from '../protocol/index.js';
+import {BridgeError,MODEL_LABELS} from '../protocol/index.js';
 import type {ContextPlan,ContextSnapshot,FeedbackCheckpoint} from '../protocol/context.js';
 import {planContext,feedbackCheckpoint,appendedUserFeedback,resumeContext,requestIdentity} from '../protocol/context.js';
 import {refusalMessage,type CancelReceipt} from '../protocol/cancellation.js';
@@ -23,6 +23,7 @@ export class DirectSessions {
    if(!validSession(record.sessionId)||(record.agentId!==undefined&&!validAgent(record.agentId))||typeof record.key!=='string'||! /^[a-f0-9]{64}$/.test(record.workspaceKey)||!Number.isInteger(record.epoch)||!['ready','busy','cancelling','uncertain'].includes(record.state))throw new Error('Invalid direct context record');
    if(record.snapshot&&(!Array.isArray(record.snapshot.messageHashes)||record.snapshot.messageHashes.length>10000||!record.snapshot.messageHashes.every((h:any)=>typeof h==='string'&&/^[a-f0-9]{64}$/.test(h))||!record.snapshot.controlHashes||!Object.values(record.snapshot.controlHashes).every(h=>typeof h==='string'&&/^[a-f0-9]{64}$/.test(h))))throw new Error('Invalid direct context fingerprints');
    if(record.interruption){const value=record.interruption;if(!value.snapshot||!Array.isArray(value.snapshot.messageHashes)||value.snapshot.messageHashes.length>10000||!value.snapshot.messageHashes.every((h:any)=>typeof h==='string'&&/^[a-f0-9]{64}$/.test(h))||!value.snapshot.controlHashes||!Object.values(value.snapshot.controlHashes).every(h=>typeof h==='string'&&/^[a-f0-9]{64}$/.test(h))||(value.tailUserBlockHashes!==undefined&&(!Array.isArray(value.tailUserBlockHashes)||value.tailUserBlockHashes.length>10000||!value.tailUserBlockHashes.every((h:any)=>typeof h==='string'&&/^[a-f0-9]{64}$/.test(h)))))throw new Error('Invalid interruption fingerprints');}
+   if(record.interruption?.tailUserTextOnly!==undefined&&typeof record.interruption.tailUserTextOnly!=='boolean')throw new Error('Invalid interrupted text-tail proof');
    if(record.resume&&(!record.resume.snapshot||!Array.isArray(record.resume.snapshot.messageHashes)||record.resume.snapshot.messageHashes.length>10000||!record.resume.snapshot.messageHashes.every((h:any)=>typeof h==='string'&&/^[a-f0-9]{64}$/.test(h))||!record.resume.snapshot.controlHashes||!Object.values(record.resume.snapshot.controlHashes).every(h=>typeof h==='string'&&/^[a-f0-9]{64}$/.test(h))||typeof record.resume.conversationId!=='string'||typeof record.resume.cancelledJobId!=='string'))throw new Error('Invalid resumable cancellation');
    if(record.deliveryFailure!==undefined&&(typeof record.deliveryFailure!=='string'||record.deliveryFailure.length>1000))throw new Error('Invalid delivery failure');
    if(record.failure&&(!/^[a-f0-9]{64}$/.test(record.failure.identity)||record.failure.code!=='provider_refusal'||typeof record.failure.message!=='string'||record.failure.message.length>1000))throw new Error('Invalid terminal failure');
@@ -40,11 +41,11 @@ export class DirectSessions {
   const key=createHash('sha256').update(sessionId+'\0'+request.model+(agentId===undefined?'':'\0'+agentId)).digest('hex');let record=this.records.get(key);
   if(record?.state==='cancelling'){const waiter=this.cancellationWaiters.get(key);if(!waiter)throw new BridgeError('Cancellation confirmation is unavailable; no new request was submitted',503,'api_error');let timer:ReturnType<typeof setTimeout>|undefined;try{await Promise.race([waiter.promise,new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new BridgeError('Cancellation confirmation is still pending; no new request was submitted',503,'api_error')),16000);})]);}finally{clearTimeout(timer);}record=this.records.get(key);}
   if(record?.failure)throw new BridgeError(record.failure.message,400,'invalid_request_error');
-  if(record?.rebuildIdentity===requestIdentity(request))throw new BridgeError('Automatic recovery was already attempted for this feedback; no additional chat was created',400,'invalid_request_error');
   if(record&&record.workspaceKey!==workspaceKey){if(record.resetReason==='manual-resync')record.workspaceKey=workspaceKey;else throw new BridgeError('Native session workspace changed; explicit resynchronization is required',409);}
   if(record?.state==='busy')throw new BridgeError('Native context is busy; overlapping main requests are not mixed',409);
   const interruptedFeedback=record?.state==='uncertain'&&record.interruption&&appendedUserFeedback(request,record.interruption);
   if(record?.state==='uncertain'&&!interruptedFeedback)throw new BridgeError('Native context delivery is uncertain. Use context-reset --session '+sessionId+(agentId?' --agent '+agentId:'')+' before resynchronizing.'+(record.deliveryFailure?' Last failure: '+record.deliveryFailure:''),409);
+  if(record?.rebuildIdentity===requestIdentity(request))throw new BridgeError('Automatic recovery was already attempted for this feedback; no additional chat was created',400,'invalid_request_error');
   if(!record){record={key,sessionId,agentId,workspaceKey,model:request.model,epoch:0,state:'ready',compactSequence:0,updated:new Date().toISOString()};this.records.set(key,record);}
   const compact=this.compactions.get(scopeKey(sessionId,agentId));const sequence=compact?.sequence??0;
   const resume=cancelContinuation&&interruptedFeedback&&!contextCompacted&&sequence===record.compactSequence?record.resume:undefined;
@@ -54,8 +55,8 @@ export class DirectSessions {
   const feedback=feedbackCheckpoint(request,plan.snapshot);if((feedback.tailUserBlockHashes?.length??0)>10000)throw new BridgeError('Native feedback fingerprint limit exceeded',413);
   const recoveryCheckpoint=interruptedFeedback?record.interruption:undefined;
   if(interruptedFeedback&&!resume)record.resetReason='client-interrupted-feedback';
-  const isolatedRecovery=!!cancelContinuation&&!!interruptedFeedback&&!resume;
-  const recoveryReason=isolatedRecovery?(record.fallbackReason??'original-chat-unverified'):undefined;
+  const isolatedRecovery=!!cancelContinuation&&(!!interruptedFeedback&&!resume||force==='original-chat-unavailable');
+  const recoveryReason=isolatedRecovery?(force==='original-chat-unavailable'?force:record.fallbackReason??'original-chat-unverified'):undefined;
   record.state='busy';record.jobId=jobId;delete record.interruption;delete record.resume;record.updated=new Date().toISOString();await this.persist();
   return {key,sessionId,agentId,workspaceKey,model:request.model,jobId,epoch:record.epoch+(plan.kind==='bootstrap'?1:0),conversationId:resume?.conversationId??(plan.kind==='delta'?record.conversationId:undefined),plan,compactSequence:sequence,feedback,recoveryCheckpoint,identity:requestIdentity(request),isolatedRecovery,recoveryReason,resumeBackup:resume};
  }
@@ -63,7 +64,7 @@ export class DirectSessions {
   const record=this.records.get(frame.key);if(!record||record.state!=='busy'||record.jobId!==frame.jobId)throw new BridgeError('Native context lease changed',409);
   record.epoch=frame.epoch;record.conversationId=conversationId;record.snapshot=frame.plan.snapshot;record.compactSequence=frame.compactSequence;record.state='ready';record.lastJobId=frame.jobId;delete record.jobId;delete record.resetReason;delete record.fallbackReason;delete record.failure;delete record.deliveryFailure;delete record.rebuildIdentity;record.updated=new Date().toISOString();await this.persist();
  }
- async fail(frame:DirectFrame,uncertain:boolean,clientInterrupted=false,deliveryFailure?:string){const record=this.records.get(frame.key);if(!record||record.jobId!==frame.jobId)return;const checkpoint=uncertain?(clientInterrupted?frame.feedback:undefined):frame.recoveryCheckpoint;record.state=uncertain||checkpoint?'uncertain':'ready';if(uncertain&&!clientInterrupted&&deliveryFailure)record.deliveryFailure=deliveryFailure.slice(0,1000);else if(!uncertain)delete record.deliveryFailure;if(checkpoint)record.interruption=checkpoint;else delete record.interruption;if(!uncertain&&frame.resumeBackup)record.resume=frame.resumeBackup;else delete record.resume;delete record.jobId;record.updated=new Date().toISOString();await this.persist();}
+ async fail(frame:DirectFrame,uncertain:boolean,clientInterrupted=false,deliveryFailure?:string){const record=this.records.get(frame.key);if(!record||record.jobId!==frame.jobId)return;const checkpoint=uncertain?(clientInterrupted?frame.feedback:undefined):frame.recoveryCheckpoint;record.state=uncertain||checkpoint?'uncertain':'ready';if(uncertain&&!clientInterrupted&&deliveryFailure)record.deliveryFailure=deliveryFailure.slice(0,1000);else if(!uncertain)delete record.deliveryFailure;if(!uncertain&&frame.isolatedRecovery&&record.rebuildIdentity===frame.identity)delete record.rebuildIdentity;if(checkpoint)record.interruption=checkpoint;else delete record.interruption;if(!uncertain&&frame.resumeBackup)record.resume=frame.resumeBackup;else delete record.resume;delete record.jobId;record.updated=new Date().toISOString();await this.persist();}
  async beginCancellation(frame:DirectFrame){
   const record=this.records.get(frame.key);if(!record||!(record.jobId===frame.jobId||record.state==='ready'&&record.lastJobId===frame.jobId))return false;
   record.state='cancelling';record.jobId=frame.jobId;record.interruption=frame.feedback;delete record.resume;record.updated=new Date().toISOString();
@@ -75,6 +76,7 @@ export class DirectSessions {
   if(receipt.reason==='provider_refusal'){
    record.failure={identity:frame.identity,code:'provider_refusal',message:refusalMessage(receipt.refusalKind)};delete record.interruption;
   }else if(receipt.outcome==='not_sent'){
+   if(frame.isolatedRecovery&&record.rebuildIdentity===frame.identity)delete record.rebuildIdentity;
    const prior=frame.recoveryCheckpoint;record.state=prior?'uncertain':'ready';if(prior){record.interruption=prior;record.resume=frame.resumeBackup;}else delete record.interruption;
   }else if(receipt.outcome==='settled'){
    const snapshot=receipt.inputComplete?frame.plan.snapshot:frame.plan.kind==='bootstrap'?undefined:record.snapshot;record.epoch=frame.epoch;
@@ -103,7 +105,15 @@ export class DirectSessions {
  }
  compacting(sessionId:string,agentId?:string){return this.compactions.get(scopeKey(sessionId,agentId))?.phase==='running';}
  async abortCompact(sessionId:string,agentId?:string){const compact=this.compactions.get(scopeKey(sessionId,agentId));if(compact){compact.phase='ready';await this.persist();}}
- async reset(sessionId:string,agentId?:string){if(!validSession(sessionId)||(agentId!==undefined&&!validAgent(agentId)))throw new BridgeError('Invalid session identity');const records=[...this.records.values()].filter(record=>record.sessionId===sessionId&&record.agentId===agentId);if(records.some(record=>record.state==='busy'||record.state==='cancelling'))throw new BridgeError('Cannot reset an active native context',409);for(const record of records){record.state='ready';record.resetReason='manual-resync';delete record.rebuildIdentity;delete record.failure;delete record.deliveryFailure;delete record.resume;delete record.interruption;delete record.conversationId;record.updated=new Date().toISOString();}const compact=this.compactions.get(scopeKey(sessionId,agentId));if(compact){compact.phase='ready';delete compact.workspaceKey;}await this.persist();}
+ async reset(sessionId:string,agentId?:string,model?:string){
+  if(!validSession(sessionId)||(agentId!==undefined&&!validAgent(agentId)))throw new BridgeError('Invalid session identity');
+  if(model!==undefined&&(typeof model!=='string'||!Object.hasOwn(MODEL_LABELS,model)))throw new BridgeError('Invalid reset model');
+  const records=[...this.records.values()].filter(record=>record.sessionId===sessionId&&record.agentId===agentId&&(model===undefined||record.model===model));
+  if(records.some(record=>record.state==='busy'||record.state==='cancelling'))throw new BridgeError('Cannot reset an active native context',409);
+  for(const record of records){record.state='ready';record.resetReason='manual-resync';delete record.rebuildIdentity;delete record.failure;delete record.deliveryFailure;delete record.resume;delete record.interruption;delete record.conversationId;record.updated=new Date().toISOString();}
+  const compact=this.compactions.get(scopeKey(sessionId,agentId));if(compact&&model===undefined){compact.phase='ready';delete compact.workspaceKey;}
+  await this.persist();
+ }
  list(sessionId?:string){return [...this.records.values()].filter(r=>!sessionId||r.sessionId===sessionId).map(r=>({sessionId:r.sessionId,agentId:r.agentId,workspaceKey:r.workspaceKey,model:r.model,epoch:r.epoch,state:r.state,conversationId:r.conversationId,messageCount:r.snapshot?.messageHashes.length??0,estimatedTokens:r.snapshot?.estimatedTokens??0,updated:r.updated}));}
  async flush(){await this.persistence;}
 }

@@ -16,7 +16,11 @@ export type ObjectValue = Record<string, any>;
 export interface MessagesRequest extends ObjectValue { model: string; max_tokens: number; messages: ObjectValue[]; tools?: ObjectValue[]; stream?: boolean }
 export interface Reply { content: ObjectValue[] }
 export interface Message { id: string; type: 'message'; role: 'assistant'; model: string; content: ObjectValue[]; stop_reason: string; stop_sequence: null; usage: { input_tokens: number; output_tokens: number } }
-export const MODEL_LABELS: Record<string, string> = { 'copilot-opus-5.5': 'Claude Opus 5.5', 'copilot-sonnet-5.5': 'Claude Sonnet 5.5' };
+export const MODEL_LABELS: Record<string, string> = { 'copilot-opus-5.5': 'Claude Opus 5.5', 'copilot-sonnet-5.5': 'Claude Sonnet 5.5', 'copilot-gpt-6.1-sol': 'GPT-6.1 Sol', 'copilot-gpt-6-sol': 'GPT-6 Sol' };
+export function nativeModel(value:string):string {
+  const aliases:Record<string,string>={opus:'copilot-opus-5.5',sonnet:'copilot-sonnet-5.5',gpt61:'copilot-gpt-6.1-sol',gpt6:'copilot-gpt-6-sol'};
+  const id=Object.hasOwn(aliases,value)?aliases[value]:value;if(!Object.hasOwn(MODEL_LABELS,id))throw new BridgeError('Model must be opus, sonnet, gpt61, gpt6, or one of their copilot deployment IDs');return id;
+}
 export function object(value: unknown): value is ObjectValue { return !!value && typeof value === 'object' && !Array.isArray(value); }
 
 function validateContent(content: unknown, ids: Set<string>, results: Set<string>, role: string): void {
@@ -25,6 +29,17 @@ function validateContent(content: unknown, ids: Set<string>, results: Set<string
   for (const block of content) {
     if (!object(block)) throw new BridgeError('Invalid content block');
     if (block.type === 'text' && typeof block.text === 'string') continue;
+    // Resumed/forked sessions may carry reasoning from a different provider.
+    // Validate its shape without interpreting its opaque signature, then omit
+    // the whole block from the transport copy below. Never turn it into text.
+    if (block.type === 'thinking' && role === 'assistant') {
+      if (typeof block.thinking !== 'string' || (block.signature !== undefined && typeof block.signature !== 'string')) throw new BridgeError('Invalid historical thinking block');
+      continue;
+    }
+    if (block.type === 'redacted_thinking' && role === 'assistant') {
+      if (typeof block.data !== 'string') throw new BridgeError('Invalid historical redacted_thinking block');
+      continue;
+    }
     if(block.type==='image'&&(role==='user'||role==='tool-result')){validateImage(block);continue;}
     if (block.type === 'tool_use' && role === 'assistant' && typeof block.id === 'string' && typeof block.name === 'string' && object(block.input)) {
       if (ids.has(block.id)) throw new BridgeError('Duplicate tool use identifier');
@@ -34,11 +49,11 @@ function validateContent(content: unknown, ids: Set<string>, results: Set<string
       if (!ids.has(block.tool_use_id) || results.has(block.tool_use_id)) throw new BridgeError('Unmatched or duplicate tool result');
       results.add(block.tool_use_id); validateContent(block.content ?? '', ids, results, 'tool-result'); continue;
     }
-    throw new BridgeError(`Unsupported content block: ${String(block.type)}. Text, native tool blocks and base64 images are supported; other media and signed reasoning are not.`);
+    throw new BridgeError(`Unsupported content block: ${String(block.type)}. Text, native tool blocks and base64 images are supported; historical assistant reasoning is omitted, and other content is not supported.`);
   }
 }
 export function parseRequest(value: unknown): MessagesRequest {
-  if (!object(value) || !MODEL_LABELS[value.model]) throw new BridgeError('Choose copilot-opus-5.5 or copilot-sonnet-5.5');
+  if (!object(value) || typeof value.model!=='string' || !Object.hasOwn(MODEL_LABELS,value.model)) throw new BridgeError('Choose a supported Copilot model: '+Object.keys(MODEL_LABELS).join(', '));
   if (!Number.isInteger(value.max_tokens) || value.max_tokens < 1 || !Array.isArray(value.messages) || value.messages.length === 0) throw new BridgeError('Invalid Messages request');
   if (value.stream !== undefined && typeof value.stream !== 'boolean') throw new BridgeError('stream must be boolean');
   if (value.system !== undefined) validateContent(value.system, new Set(), new Set(), 'system');
@@ -56,7 +71,14 @@ export function parseRequest(value: unknown): MessagesRequest {
       try { compileSchema(tool.input_schema); } catch (error) { throw new BridgeError(`Unsupported JSON schema for ${tool.name}: ${error instanceof Error ? error.message : 'invalid schema'}`); }
     }
   }
-  return value as MessagesRequest;
+  const messages = value.messages.flatMap(message => {
+    if (message.role !== 'assistant' || !Array.isArray(message.content)) return [message];
+    const content = message.content.filter((block: ObjectValue) => !['thinking', 'redacted_thinking'].includes(block.type));
+    if (content.length === message.content.length) return [message];
+    return content.length ? [{ ...message, content }] : [];
+  });
+  if (!messages.length) throw new BridgeError('No transferable conversation content remains after omitting historical reasoning');
+  return { ...value, messages } as MessagesRequest;
 }
 export const REPLY_CONTRACT='Return exactly ONE fenced json code block, with no prose outside it. The code block is required because ordinary Markdown paragraphs remove JSON escape characters in the chat renderer. Preserve valid JSON escaping for backslashes, double quotes, tabs and newlines. Use this shape:\n'
   +'```json\n{"content":[{"type":"text","text":"your answer"},{"type":"tool_use","name":"an available tool name","input":{}}]}\n```\n'

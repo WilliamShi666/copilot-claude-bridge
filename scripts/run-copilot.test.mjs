@@ -17,8 +17,15 @@ test('launcher preserves workspace paths and caller permission/team overrides',(
  const defaults=parseArguments(['--check'],tmpdir());assert.equal(defaults.workspace,resolve(tmpdir()));assert.equal(defaults.checkOnly,true);
  assert.deepEqual(defaults.nativeArgs,['--teammate-mode','in-process','--permission-mode','auto']);
  assert.throws(()=>parseArguments(['--model']),/Value required/);
- assert.throws(()=>parseArguments(['--model','other']),/opus or sonnet/);
+ assert.throws(()=>parseArguments(['--model','other']),/gpt61/);
  assert.throws(()=>parseArguments(['--check','--gateway-only']),/Choose/);
+});
+
+test('normal launchers preserve both explicit GPT aliases and deployment IDs across native resume',()=>{
+ for(const model of ['gpt61','gpt6','copilot-gpt-6.1-sol','copilot-gpt-6-sol']){
+  const value=parseArguments(['a project','--model',model,'--resume','existing-session']);
+  assert.deepEqual(value.bridgeArgs,['--model',model]);assert.ok(value.nativeArgs.includes('--resume'));assert.ok(value.nativeArgs.includes('existing-session'));
+ }
 });
 
 test('launcher rejects external URLs, URL credentials and invalid runtime keys',()=>{

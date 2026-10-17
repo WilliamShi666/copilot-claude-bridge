@@ -3,6 +3,22 @@ import assert from 'node:assert/strict';
 import {planContext,estimateTokens,renderContextPrompt,feedbackCheckpoint,appendedUserFeedback} from '../packages/protocol/context.js';
 const initial={model:'copilot-opus-5.5',max_tokens:1024,system:[{type:'text',text:'Native system rules'}],tools:[{name:'Read',input_schema:{type:'object'}}],messages:[{role:'user',content:'Read a file'}]};
 
+test('cancelled standalone text can be replaced by native feedback without replacing earlier history or tool results',()=>{
+ const prefix=[{role:'user',content:'Initial task'},{role:'assistant',content:'Actual completed response'}];
+ const cancelled={...initial,messages:[...prefix,{role:'user',content:'An interrupted explanation'}]};
+ const checkpoint=feedbackCheckpoint(cancelled,planContext(cancelled).snapshot);
+ const feedback={...initial,messages:[...prefix,{role:'user',content:'Continue by reading the existing file'},{role:'system',content:'New runtime counters'}]};
+ assert.equal(appendedUserFeedback(feedback,checkpoint),true);
+ assert.equal(appendedUserFeedback(cancelled,checkpoint),false);
+ assert.equal(appendedUserFeedback({...feedback,messages:[{role:'user',content:'Changed initial task'},...feedback.messages.slice(1)]},checkpoint),false);
+ for(const content of ['[Request interrupted by user]','<system-reminder>New counter</system-reminder>'])assert.equal(appendedUserFeedback({...feedback,messages:[...prefix,{role:'user',content}]},checkpoint),false);
+ for(const text of ['[Request interrupted by user]','<system-reminder>New counter</system-reminder>'])assert.equal(appendedUserFeedback({...feedback,messages:[...prefix,{role:'user',content:[{type:'text',text:'An interrupted explanation'},{type:'text',text}]}]},checkpoint),false);
+ const tools={...initial,messages:[...prefix,{role:'user',content:[{type:'tool_result',tool_use_id:'real',content:'Actual result'}]}]};
+ assert.equal(appendedUserFeedback(feedback,feedbackCheckpoint(tools,planContext(tools).snapshot)),false);
+ const legacy={...checkpoint};delete (legacy as any).tailUserTextOnly;
+ assert.equal(appendedUserFeedback(feedback,legacy),false);
+});
+
 test('interruption recovery requires appended feedback, rejecting reminder churn, removed history and assistant-only changes',()=>{
  const input={...initial,messages:[{role:'user',content:[{type:'tool_result',tool_use_id:'q',content:'Answer'},{type:'text',text:'Prior feedback',cache_control:{type:'ephemeral'}}]}]};
  const checkpoint=feedbackCheckpoint(input,planContext(input).snapshot);

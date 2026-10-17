@@ -92,10 +92,14 @@ async function requirePacketFrame(tabId:number,frameId:number|undefined,lane:str
 async function frameMessage(value: any) {
   const lane=value.lane??'main';if(!validBrowserLane(lane))throw new Error('Invalid browser lane');
   if(value.type==='job'&&value.isolatedRecovery){
+   try{
     if(lane==='main'){
-      await recovery.close(true);const frame=await recovery.ensure();if(canceledJobs.has(value.id))throw Object.assign(new Error('Recovery cancelled before submission'),{submitted:false});
+      // A failed preparation has not forwarded a job to this owned page. Reuse
+      // it while it finishes loading instead of creating a tab on every retry.
+      const frame=await recovery.ensure();if(canceledJobs.has(value.id))throw Object.assign(new Error('Recovery cancelled before submission'),{submitted:false});
       if(!config)throw new Error('Pairing lost during recovery');config.tabId=frame.tabId;config.frameId=frame.frameId;config.ready=frame.ready;config.documentKey=frame.documentKey;config.recovery=undefined;await save();
     }else await ownedManager(lane).close(true);
+   }catch(error){throw Object.assign(error instanceof Error?error:new Error('Recovery tab preparation failed'),{submitted:false});}
   }
   if(lane!=='main'){
     if(value.type==='cancel'){const frame=ownedBinding(lane);if(frame?.frameId===undefined)return{cancelled:true};return await chrome.tabs.sendMessage(frame.tabId,value,{frameId:frame.frameId});}
@@ -167,7 +171,7 @@ async function commitPair(intent: PairIntent) {
   if (!response.ok) { const detail = await response.json().catch(() => null); throw new Error(detail?.error?.message ?? 'Pair code rejected; restart gateway for a fresh code'); }
   const { token } = await response.json();
   if (typeof token !== 'string' || !/^[a-f0-9]{64}$/.test(token)) throw new Error('Invalid gateway pairing response');
-  await save();await frameMessage({type:'disconnect'}).catch(()=>{});await retireAgentTabs();await auxiliary.close(true);
+  await save();await frameMessage({type:'disconnect'}).catch(()=>{});await retireAgentTabs();await auxiliary.close(true);await recovery.close(true);
   socket?.close(); socket = undefined;
   const selected=await chrome.tabs.get(intent.tabId);
   config = { url: intent.url, token, workerId: crypto.randomUUID(), tabId: intent.tabId,workbookUrl:selected.url, ready: false }; await save();
@@ -289,7 +293,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
       const tab = await chrome.tabs.get(message.tabId);
       if (!tab.url?.startsWith('https://excel.cloud.microsoft/')) throw new Error('Select an Excel workbook tab first');
       await frameMessage({ type: 'disconnect' }).catch(() => {});
-      await retireAgentTabs();await auxiliary.close(true); // A retired auxiliary tab may contain a human draft.
+      await retireAgentTabs();await auxiliary.close(true);await recovery.close(true); // Retire routing only; these pages may contain human drafts.
       if(different){await save();send({type:'ready',ready:false});socket?.close();socket=undefined;config={...stored!,tabId:message.tabId,ready:false};}
       config.tabId = message.tabId;config.documentKey=undefined;config.workbookUrl=tab.url; config.frameId = undefined; config.ready = false; await save();
       send({ type: 'ready', ready: false });

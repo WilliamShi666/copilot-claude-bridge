@@ -1,6 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { childEnvironment, sessionSettings } from '../packages/cli/index.js';
+import {nativeModel,MODEL_LABELS,parseRequest} from '../packages/protocol/index.js';
+
+test('GPT main models use explicit deployment IDs and session-local native selection',()=>{
+ for(const [alias,id,label] of [['gpt61','copilot-gpt-6.1-sol','GPT-6.1 Sol'],['gpt6','copilot-gpt-6-sol','GPT-6 Sol']]){
+  assert.equal(nativeModel(alias),id);assert.equal(nativeModel(id),id);assert.equal(MODEL_LABELS[id],label);
+  const settings=sessionSettings('http://127.0.0.1:59175','synthetic-key',alias);
+  assert.equal(settings.model,id);assert.equal(settings.env.ANTHROPIC_MODEL,id);assert.equal(settings.env.ANTHROPIC_DEFAULT_HAIKU_MODEL,id);assert.ok(settings.availableModels.includes(id));
+  assert.equal(parseRequest({model:id,max_tokens:100,messages:[{role:'user',content:'Hello'}]}).model,id);
+ }
+ for(const invalid of ['gpt-unknown','constructor','toString','__proto__'])assert.throws(()=>nativeModel(invalid));
+});
 test('only child environment changes; stale credentials/providers do not leak to bridge', () => {
   const input = { PATH: 'original', ANTHROPIC_API_KEY: 'user-original-secret', ANTHROPIC_BASE_URL: 'https://original', CLAUDE_CODE_USE_BEDROCK: '1', CLAUDE_AUTOCOMPACT_PCT_OVERRIDE:'65', CUSTOM: 'keep' };
   const env = childEnvironment(input, 'http://127.0.0.1:59173', 'bridge-key', 'copilot-opus-5.5');

@@ -1,5 +1,25 @@
 export interface ContextPacket {prompt:string;ack?:string}
 export const UI_PACKET_CHARS=350000;
+export const AUTOMATIC_RETRY_LIMIT=5;
+export class ContextAckFormatError extends Error {constructor(){super('Copilot context transfer acknowledgment is malformed');}}
+export function validateContextAck(reply:string,ack:string):void{
+ const clean=reply.trim().replace(/^```(?:json)?\s*([\s\S]*?)\s*```$/,'$1');let value:any;
+ try{value=JSON.parse(clean);}catch{throw new ContextAckFormatError();}
+ if(Object.keys(value??{}).join(',')!=='content'||!Array.isArray(value.content)||value.content.length!==1||value.content[0]?.type!=='text'||value.content[0]?.text!==ack||Object.keys(value.content[0]).sort().join(',')!=='text,type')throw new Error('Copilot did not acknowledge the exact context fragment; intermediate tools were not forwarded');
+}
+export function repairableContextAck(reply:string,ack:string):boolean{
+ if(!ack.startsWith('BRIDGE_CONTEXT_ACK_')||ack.length<32)return false;
+ const raw=reply.trimStart().replace(/^```(?:json)?\s*/,'');let partial='',quoted=false,escaped=false;
+ for(const char of raw){
+  if(quoted){partial+=char;if(escaped)escaped=false;else if(char==='\\')escaped=true;else if(char==='"')quoted=false;}
+  else {if(char==='"')quoted=true;if(!/\s/.test(char))partial+=char;}
+ }
+ const expected=JSON.stringify({content:[{type:'text',text:ack}]});
+ return partial.length<expected.length&&partial.includes(ack.slice(0,32))&&expected.startsWith(partial);
+}
+export function contextAckRepairPrompt(ack:string):string{
+ return 'Your acknowledgment of the immediately preceding context fragment was truncated. Do not repeat or reprocess the source data, answer the task, edit the workbook, or request tools. Only acknowledge that same already received fragment. If you cannot acknowledge it, explain that instead. Return exactly this one fenced JSON block and no other content:\n```json\n'+JSON.stringify({content:[{type:'text',text:ack}]})+'\n```';
+}
 const prefix='Receive a consecutive fragment of the complete native client request. The data field is a JSON string: decode its escapes and retain the exact text in order. Do not answer the request or execute tools yet. Do not edit the workbook. After every fragment, return exactly one fenced json block with the specified acknowledgment and no other content.\nCONTEXT TRANSFER DATA:\n';
 function render(id:string,index:number,total:number,data:string){
  const ack=`BRIDGE_CONTEXT_ACK_${id}_${index}`;
